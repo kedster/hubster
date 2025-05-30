@@ -1,0 +1,9 @@
+{
+  "name": "SEO Inject",
+  "description": "INject SEO Header to Optimise your website for search engines.",
+  "version": "1.0.0",
+  "icon": "🛠️",
+  "status": "active",
+  "category": "utility",
+  "tags": ["tag1", "tag2"]
+}
