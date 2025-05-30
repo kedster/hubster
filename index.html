@@ -27,6 +27,7 @@
             </div>
         </div>
     </header>
+    
     <main>
         <div class="container">
             <!-- Home View -->
@@ -90,7 +91,16 @@
                         <li>Create a new folder in the <code>/tools</code> directory</li>
                         <li>Add an <code>index.html</code> file with your tool</li>
                         <li>Create a <code>config.json</code> file with tool metadata</li>
+                        <li>Run the build script: <code>node scripts/build.js build</code></li>
                         <li>The tool will be automatically discovered and added to the hub</li>
+                    </ol>
+                    
+                    <h3>Development</h3>
+                    <p>To develop and test locally:</p>
+                    <ol style="margin: 1rem 0; padding-left: 2rem;">
+                        <li>Build the project: <code>node scripts/build.js build</code></li>
+                        <li>Start development server: <code>node scripts/build.js serve</code></li>
+                        <li>Open <code>http://localhost:3000</code> in your browser</li>
                     </ol>
                 </div>
             </div>
@@ -102,41 +112,8 @@
             <p>&copy; 2025 Tool Hub. Built with ❤️ and deployed with Cloudflare Pages.</p>
         </div>
     </footer>
+    
+    <!-- Load the frontend script -->
     <script src="scripts/script.js"></script>
-    <script>
-        // Initialize the app
-        document.addEventListener('DOMContentLoaded', () => {
-            showHome();
-            loadTools();
-        });
-
-        // Function to show the home view
-        function showHome() {
-            document.getElementById('home-view').style.display = 'block';
-            document.getElementById('tool-view').style.display = 'none';
-            document.getElementById('about-view').style.display = 'none';
-        }
-
-        // Function to show the about view
-        function showAbout() {
-            document.getElementById('home-view').style.display = 'none';
-            document.getElementById('tool-view').style.display = 'none';
-            document.getElementById('about-view').style.display = 'block';
-        }
-
-        // Function to scroll to tools section
-        function scrollToTools() {
-            document.getElementById('tools').scrollIntoView({ behavior: 'smooth' });
-        }
-        // Function to load tools dynamically
-        function loadTools() {
-            // Simulate an API call to fetch tools
-            setTimeout(() => {
-                // For demo purposes, we'll use the fallback tools
-                allTools = fallbackTools;
-                renderTools();
-            }, 1000);
-        }
-    </script>
 </body>
 </html>
