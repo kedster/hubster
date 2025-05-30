@@ -150,82 +150,91 @@ function openTool(tool) {
     
     const iframe = document.createElement('iframe');
     
-    // Ensure proper path construction - use dist path if available
+// Tool opening - Fixed for CSS loading
+function openTool(tool) {
+    const toolView = document.getElementById('tool-view');
+    const toolTitle = document.getElementById('tool-title');
+    const toolContent = document.getElementById('tool-content');
+    
+    if (!toolView || !toolTitle || !toolContent) return;
+    
+    hideAllViews();
+    toolView.style.display = 'block';
+    toolTitle.textContent = tool.name;
+    
+    const iframe = document.createElement('iframe');
+    
+    // Fix path construction to prevent duplication
     let toolPath;
     if (tool.path) {
-        toolPath = tool.path.startsWith('/') ? tool.path.substring(1) : tool.path;
+        // Remove leading slash and ensure no duplication
+        toolPath = tool.path.replace(/^\/+/, '');
+        // If path already starts with correct prefix, don't add it again
+        if (!toolPath.startsWith('tools/') && !toolPath.startsWith('dist/tools/')) {
+            toolPath = `tools/${toolPath}`;
+        }
     } else {
         toolPath = `tools/${tool.id}`;
     }
     
-    // Check if we should use the dist version
-    const useDistPath = window.location.pathname.includes('dist/') || 
-                       document.querySelector('script[src*="dist/"]') ||
-                       allTools.some(t => t.path && t.path.includes('dist/'));
+    // Clean up any duplicate segments in the path
+    toolPath = toolPath.replace(/\/tools\/([^\/]+)\/tools\/\1/, '/tools/$1');
+    toolPath = toolPath.replace(/\/dist\/tools\/([^\/]+)\/dist\/tools\/\1/, '/dist/tools/$1');
     
-    if (useDistPath && !toolPath.startsWith('dist/')) {
-        toolPath = `dist/${toolPath}`;
-    }
-    
+    console.log(`Loading tool: ${tool.name} from path: ${toolPath}`);
     iframe.src = `${toolPath}/index.html`;
     
     // Remove sandbox entirely to allow full CSS/JS loading
     iframe.style.cssText = 'width: 100%; height: 600px; border: none; border-radius: 8px; background: #fff;';
     
-    // Alternative approach: Load and inject CSS directly
+    // Fix relative paths in the loaded iframe
     iframe.onload = async function() {
         try {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
             if (iframeDoc) {
-                // Find all CSS links in the iframe
-                const links = iframeDoc.querySelectorAll('link[rel="stylesheet"]');
+                // Fix all relative links and scripts
+                const links = iframeDoc.querySelectorAll('link[href]');
+                const scripts = iframeDoc.querySelectorAll('script[src]');
                 
-                for (const link of links) {
-                    try {
-                        // Get the original href
-                        const originalHref = link.getAttribute('href');
-                        if (!originalHref) continue;
-                        
-                        // Create absolute URL for CSS file
-                        let cssUrl;
-                        if (originalHref.startsWith('http') || originalHref.startsWith('//')) {
-                            cssUrl = originalHref;
-                        } else {
-                            // Make relative path absolute based on tool location
-                            const toolBaseUrl = iframe.src.substring(0, iframe.src.lastIndexOf('/') + 1);
-                            cssUrl = new URL(originalHref, toolBaseUrl).href;
-                        }
-                        
-                        // Fetch the CSS content
-                        const response = await fetch(cssUrl);
-                        if (response.ok) {
-                            const cssText = await response.text();
-                            
-                            // Create a new style element with the CSS content
-                            const styleEl = iframeDoc.createElement('style');
-                            styleEl.textContent = cssText;
-                            
-                            // Replace the link with the style element
-                            link.parentNode.replaceChild(styleEl, link);
-                        } else {
-                            console.warn(`Failed to load CSS: ${cssUrl}`);
-                        }
-                    } catch (cssError) {
-                        console.warn('Error processing CSS link:', cssError);
+                // Get the correct base path for this tool
+                const correctBasePath = `/${toolPath}/`;
+                
+                // Fix CSS links
+                links.forEach(link => {
+                    const originalHref = link.getAttribute('href');
+                    if (originalHref && !originalHref.startsWith('http') && !originalHref.startsWith('//')) {
+                        // Remove any leading ./ or ../
+                        const cleanHref = originalHref.replace(/^\.?\/?/, '');
+                        const newHref = correctBasePath + cleanHref;
+                        console.log(`Fixing CSS path: ${originalHref} -> ${newHref}`);
+                        link.href = newHref;
                     }
-                }
+                });
                 
-                // Also handle any @import statements in existing style tags
+                // Fix script sources
+                scripts.forEach(script => {
+                    const originalSrc = script.getAttribute('src');
+                    if (originalSrc && !originalSrc.startsWith('http') && !originalSrc.startsWith('//')) {
+                        // Remove any leading ./ or ../
+                        const cleanSrc = originalSrc.replace(/^\.?\/?/, '');
+                        const newSrc = correctBasePath + cleanSrc;
+                        console.log(`Fixing JS path: ${originalSrc} -> ${newSrc}`);
+                        script.src = newSrc;
+                    }
+                });
+                
+                // Fix any CSS @import and url() references
                 const styleTags = iframeDoc.querySelectorAll('style');
-                for (const styleTag of styleTags) {
-                    if (styleTag.textContent.includes('@import')) {
-                        const toolBaseUrl = iframe.src.substring(0, iframe.src.lastIndexOf('/') + 1);
-                        styleTag.textContent = await processImports(styleTag.textContent, toolBaseUrl);
+                styleTags.forEach(style => {
+                    if (style.textContent) {
+                        style.textContent = style.textContent
+                            .replace(/url\(['"]?(?!http|\/\/)([^'"()]+)['"]?\)/g, `url('${correctBasePath}$1')`)
+                            .replace(/@import\s+['"](?!http|\/\/)([^'"]+)['"]/g, `@import '${correctBasePath}$1'`);
                     }
-                }
+                });
             }
         } catch (e) {
-            console.warn('Could not fix CSS loading:', e.message);
+            console.warn('Could not fix iframe paths:', e.message);
         }
     };
     
