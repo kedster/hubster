@@ -2,40 +2,6 @@
 let allTools = [];
 let filteredTools = [];
 
-// Fallback tools data for when the manifest isn't available
-const fallbackTools = [
-    {
-        id: "example-calculator",
-        name: "Simple Calculator",
-        description: "A basic calculator for quick mathematical operations.",
-        icon: "🧮",
-        status: "active",
-        category: "utility",
-        tags: ["math", "calculator", "utility"],
-        path: "/tools/example-calculator"
-    },
-    {
-        id: "text-counter",
-        name: "Text Counter",
-        description: "Count characters, words, and lines in your text.",
-        icon: "📝",
-        status: "active",
-        category: "utility",
-        tags: ["text", "counter", "utility"],
-        path: "/tools/text-counter"
-    },
-    {
-        id: "color-picker",
-        name: "Color Picker",
-        description: "Generate and convert colors between different formats.",
-        icon: "🎨",
-        status: "beta",
-        category: "design",
-        tags: ["color", "design", "converter"],
-        path: "/tools/color-picker"
-    }
-];
-
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
     showHome();
@@ -65,42 +31,136 @@ function scrollToTools() {
     }
 }
 
-// Function to load tools dynamically
-function loadTools() {
+// Function to dynamically discover and load tools
+async function loadTools() {
     const loadingEl = document.getElementById('loading');
     const errorEl = document.getElementById('error');
     
-    // Show loading state
     loadingEl.style.display = 'block';
     errorEl.style.display = 'none';
+    allTools = [];
     
-    // Try to load from manifest first, then fallback
-    setTimeout(() => {
-        try {
-            // Check if TOOLS_MANIFEST is available (injected by build script)
-            if (window.TOOLS_MANIFEST && window.TOOLS_MANIFEST.tools) {
-                allTools = window.TOOLS_MANIFEST.tools;
-                console.log('Loaded tools from manifest:', allTools.length);
-            } else {
-                // Use fallback tools
-                allTools = fallbackTools;
-                console.log('Using fallback tools:', allTools.length);
-                errorEl.style.display = 'block';
-            }
-            
-            filteredTools = [...allTools];
-            renderTools();
-            loadingEl.style.display = 'none';
-            
-        } catch (error) {
-            console.error('Error loading tools:', error);
-            allTools = fallbackTools;
-            filteredTools = [...allTools];
-            renderTools();
-            loadingEl.style.display = 'none';
-            errorEl.style.display = 'block';
+    try {
+        // Get list of potential tool directories
+        const toolDirs = await discoverToolDirectories();
+        
+        if (toolDirs.length === 0) {
+            throw new Error('No tool directories found');
         }
-    }, 1000);
+        
+        // Load each tool's configuration
+        for (const dir of toolDirs) {
+            try {
+                const config = await loadToolConfig(dir);
+                if (config && validateToolConfig(config)) {
+                    const tool = {
+                        id: dir,
+                        path: `tools/${dir}`,
+                        ...config
+                    };
+                    allTools.push(tool);
+                    console.log(`✅ Loaded: ${tool.name}`);
+                }
+            } catch (err) {
+                console.warn(`❌ Failed to load tool ${dir}:`, err.message);
+            }
+        }
+        
+        if (allTools.length === 0) {
+            throw new Error('No valid tools found');
+        }
+        
+        filteredTools = [...allTools];
+        renderTools();
+        loadingEl.style.display = 'none';
+        
+        console.log(`🎉 Successfully loaded ${allTools.length} tools`);
+        
+    } catch (error) {
+        console.error('Error loading tools:', error);
+        loadingEl.style.display = 'none';
+        errorEl.style.display = 'block';
+        
+        // Show add tool card even when no tools are found
+        renderTools();
+    }
+}
+
+// Function to discover tool directories by attempting to load common paths
+async function discoverToolDirectories() {
+    const commonToolNames = [
+        'calculator', 'text-editor', 'color-picker', 'json-formatter', 
+        'base64-encoder', 'url-encoder', 'password-generator', 'qr-generator',
+        'markdown-preview', 'css-minifier', 'js-beautifier', 'image-resizer',
+        'unit-converter', 'timestamp-converter', 'hash-generator', 'lorem-ipsum',
+        'gradient-generator', 'regex-tester', 'ascii-art', 'word-counter'
+    ];
+    
+    const discoveredDirs = [];
+    
+    // Try to discover existing tool directories
+    for (const toolName of commonToolNames) {
+        try {
+            const response = await fetch(`tools/${toolName}/config.json`);
+            if (response.ok) {
+                discoveredDirs.push(toolName);
+            }
+        } catch (err) {
+            // Silently continue - this is expected for non-existent tools
+        }
+    }
+    
+    // Also try to scan for any other directories if possible
+    try {
+        // This approach works by attempting to load a directory listing
+        // Not all servers support this, but some do
+        const response = await fetch('tools/');
+        if (response.ok) {
+            const html = await response.text();
+            const dirMatches = html.match(/href="([^"]+)\/"/g);
+            if (dirMatches) {
+                const additionalDirs = dirMatches
+                    .map(match => match.replace(/href="|\/"/g, ''))
+                    .filter(dir => !dir.includes('.') && !discoveredDirs.includes(dir));
+                discoveredDirs.push(...additionalDirs);
+            }
+        }
+    } catch (err) {
+        // Directory listing not supported, continue with discovered tools
+    }
+    
+    return [...new Set(discoveredDirs)]; // Remove duplicates
+}
+
+// Function to load tool configuration
+async function loadToolConfig(toolDir) {
+    try {
+        const response = await fetch(`tools/${toolDir}/config.json`);
+        if (!response.ok) {
+            throw new Error(`Config not found: ${response.status}`);
+        }
+        return await response.json();
+    } catch (error) {
+        throw new Error(`Failed to load config: ${error.message}`);
+    }
+}
+
+// Function to validate tool configuration
+function validateToolConfig(config) {
+    const required = ['name', 'description', 'icon'];
+    const missing = required.filter(field => !config[field]);
+    
+    if (missing.length > 0) {
+        console.warn(`Invalid config - missing: ${missing.join(', ')}`);
+        return false;
+    }
+    
+    // Set defaults
+    config.status = config.status || 'active';
+    config.category = config.category || 'utility';
+    config.tags = config.tags || [];
+    
+    return true;
 }
 
 // Function to render tools in the grid
@@ -112,6 +172,14 @@ function renderTools() {
     
     // Clear existing content
     toolsGrid.innerHTML = '';
+    
+    if (filteredTools.length === 0 && allTools.length === 0) {
+        // Show add tool card when no tools exist
+        const addToolCard = createAddToolCard();
+        toolsGrid.appendChild(addToolCard);
+        noToolsEl.style.display = 'none';
+        return;
+    }
     
     if (filteredTools.length === 0) {
         noToolsEl.style.display = 'block';
@@ -144,9 +212,9 @@ function createToolCard(tool) {
         <div class="tool-icon">${tool.icon}</div>
         <h3>${tool.name}</h3>
         <p>${tool.description}</p>
-        <a href="#" class="tool-link" onclick="event.stopPropagation(); openTool(arguments[0])" data-tool='${JSON.stringify(tool)}'>
+        <div class="tool-link" onclick="event.stopPropagation(); openTool(arguments[0])">
             Try it now →
-        </a>
+        </div>
     `;
     
     return card;
@@ -159,16 +227,19 @@ function createAddToolCard() {
     card.onclick = showAddToolInstructions;
     
     card.innerHTML = `
-        <div class="icon">➕</div>
+        <div class="add-icon">➕</div>
         <h3>Add New Tool</h3>
-        <p>Create and add your own tools to the hub</p>
+        <p>Drop your tools into the tools/ directory</p>
+        <div class="tool-link">
+            Learn how →
+        </div>
     `;
     
     return card;
 }
 
 // Function to open a tool
-function openTool(tool) {
+async function openTool(tool) {
     const toolView = document.getElementById('tool-view');
     const toolTitle = document.getElementById('tool-title');
     const toolContent = document.getElementById('tool-content');
@@ -178,58 +249,54 @@ function openTool(tool) {
     // Update tool view
     toolTitle.textContent = tool.name;
     
-    // Try to load the tool content
-    if (tool.path && tool.path.includes('/tools/')) {
-        // Create iframe to load the tool
-        toolContent.innerHTML = `
-            <div style="text-align: center; padding: 2rem;">
-                <p>Loading ${tool.name}...</p>
-                <div style="margin-top: 1rem;">
-                    <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
-                </div>
-            </div>
-            <style>
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-            </style>
-        `;
-        
-        // Simulate loading the tool (in a real app, this would load the actual tool)
-        setTimeout(() => {
-            toolContent.innerHTML = `
-                <div style="text-align: center; padding: 3rem; background: #f8fafc; border-radius: 8px;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">${tool.icon}</div>
-                    <h3>${tool.name}</h3>
-                    <p style="color: var(--text-secondary); margin: 1rem 0;">
-                        ${tool.description}
-                    </p>
-                    <div style="background: white; padding: 2rem; border-radius: 8px; margin-top: 2rem; box-shadow: var(--shadow-light);">
-                        <p><strong>Tool Status:</strong> ${tool.status}</p>
-                        <p><strong>Category:</strong> ${tool.category || 'utility'}</p>
-                        <p><strong>Tags:</strong> ${(tool.tags || []).join(', ')}</p>
-                        <hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--border-color);">
-                        <p style="font-style: italic;">
-                            This is a placeholder. In your actual deployment, the tool content from 
-                            <code>${tool.path}/index.html</code> would be loaded here.
-                        </p>
-                    </div>
-                </div>
-            `;
-        }, 1500);
-    } else {
-        toolContent.innerHTML = `
-            <div style="text-align: center; padding: 3rem;">
-                <p>Tool content not available</p>
-            </div>
-        `;
-    }
+    // Show loading state
+    toolContent.innerHTML = `
+        <div class="tool-loading">
+            <div class="loading-spinner"></div>
+            <p>Loading ${tool.name}...</p>
+        </div>
+    `;
     
     // Show tool view
     document.getElementById('home-view').style.display = 'none';
     document.getElementById('about-view').style.display = 'none';
     toolView.style.display = 'block';
+    
+    try {
+        // Try to load the tool's HTML content
+        const response = await fetch(`${tool.path}/index.html`);
+        if (response.ok) {
+            const html = await response.text();
+            
+            // Create iframe to safely load the tool
+            toolContent.innerHTML = `
+                <iframe 
+                    src="${tool.path}/index.html" 
+                    style="width: 100%; height: 600px; border: none; border-radius: 8px;"
+                    title="${tool.name}"
+                ></iframe>
+            `;
+        } else {
+            throw new Error('Tool content not available');
+        }
+    } catch (error) {
+        // Show error state
+        toolContent.innerHTML = `
+            <div class="tool-error">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">${tool.icon}</div>
+                <h3>${tool.name}</h3>
+                <p style="color: var(--text-secondary); margin: 1rem 0;">
+                    ${tool.description}
+                </p>
+                <div class="error-message">
+                    <p>⚠️ Tool content could not be loaded</p>
+                    <p style="font-size: 0.9rem; color: var(--text-secondary);">
+                        Make sure <code>${tool.path}/index.html</code> exists
+                    </p>
+                </div>
+            </div>
+        `;
+    }
 }
 
 // Function to show add tool instructions
@@ -240,34 +307,58 @@ function showAddToolInstructions() {
     
     toolTitle.textContent = 'Add New Tool';
     toolContent.innerHTML = `
-        <div style="max-width: 800px;">
-            <h3>How to Add a New Tool</h3>
-            <ol style="margin: 1rem 0; padding-left: 2rem; line-height: 1.8;">
-                <li><strong>Create Tool Directory:</strong> Create a new folder in the <code>tools/</code> directory with your tool name</li>
-                <li><strong>Add config.json:</strong> Create a configuration file with tool metadata</li>
-                <li><strong>Add index.html:</strong> Create your tool's HTML interface</li>
-                <li><strong>Build & Deploy:</strong> Run the build script and deploy to see your tool</li>
-            </ol>
+        <div class="add-tool-guide">
+            <h3>🚀 Add Your Tool in 3 Steps</h3>
             
-            <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px; margin: 2rem 0;">
-                <h4>Example config.json:</h4>
-                <pre style="background: white; padding: 1rem; border-radius: 4px; overflow-x: auto; margin-top: 0.5rem;"><code>{
-  "name": "My Awesome Tool",
-  "description": "A brief description of what your tool does",
-  "icon": "🚀",
-  "status": "active",
-  "category": "utility",
-  "tags": ["tag1", "tag2"]
-}</code></pre>
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>Create Tool Directory</h4>
+                    <p>Create a folder in <code>tools/</code> with your tool name:</p>
+                    <pre><code>tools/my-awesome-tool/</code></pre>
+                </div>
             </div>
             
-            <div style="background: #f0f9ff; padding: 1.5rem; border-radius: 8px; margin: 2rem 0;">
-                <h4>Build Commands:</h4>
-                <pre style="background: white; padding: 1rem; border-radius: 4px; margin-top: 0.5rem;"><code># Build the project
-node scripts/build.js build
-
-# Serve locally for testing
-node scripts/build.js serve</code></pre>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>Add Configuration</h4>
+                    <p>Create <code>config.json</code> with your tool metadata:</p>
+                    <pre><code>{
+  "name": "My Awesome Tool",
+  "description": "What your tool does",
+  "icon": "🔧",
+  "status": "active",
+  "category": "utility",
+  "tags": ["productivity", "helper"]
+}</code></pre>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>Create Tool Interface</h4>
+                    <p>Add <code>index.html</code> with your tool's interface:</p>
+                    <pre><code>&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+    &lt;title&gt;My Awesome Tool&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;h1&gt;My Tool&lt;/h1&gt;
+    &lt;!-- Your tool content --&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+                </div>
+            </div>
+            
+            <div class="success-note">
+                <h4>✨ That's it!</h4>
+                <p>Your tool will automatically appear in the hub. No build process required!</p>
+                <button onclick="location.reload()" class="refresh-btn">
+                    🔄 Refresh to Discover New Tools
+                </button>
             </div>
         </div>
     `;
@@ -283,7 +374,6 @@ function setupSearch() {
     const searchInput = document.getElementById('searchInput');
     if (!searchInput) return;
     
-    // Add event listeners for search
     searchInput.addEventListener('input', handleSearch);
     searchInput.addEventListener('keyup', handleSearch);
 }
@@ -293,10 +383,8 @@ function handleSearch(event) {
     const query = event.target.value.toLowerCase().trim();
     
     if (query === '') {
-        // Show all tools if search is empty
         filteredTools = [...allTools];
     } else {
-        // Filter tools based on search query
         filteredTools = allTools.filter(tool => {
             const searchText = [
                 tool.name,
