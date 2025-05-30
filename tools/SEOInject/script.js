@@ -1,604 +1,486 @@
-// Global variables
-let uploadedFile = null;
-let currentFormData = {};
+const fs = require('fs');
+const path = require('path');
 
-// DOM elements
-const elements = {
-    form: document.getElementById('seoForm'),
-    fileInput: document.getElementById('fileInput'),
-    uploadArea: document.getElementById('uploadArea'),
-    fileInfo: document.getElementById('fileInfo'),
-    fileName: document.getElementById('fileName'),
-    fileSize: document.getElementById('fileSize'),
-    processBtn: document.getElementById('processBtn'),
-    statusMessage: document.getElementById('statusMessage'),
-    previewSection: document.getElementById('previewSection'),
-    schemaType: document.getElementById('schemaType'),
-    schemaFields: document.getElementById('schemaFields'),
-    
-    // Character counters
-    metaTitle: document.getElementById('metaTitle'),
-    metaDescription: document.getElementById('metaDescription'),
-    
-    // Preview elements
-    previewTitle: document.getElementById('previewTitle'),
-    previewUrl: document.getElementById('previewUrl'),
-    previewDescription: document.getElementById('previewDescription'),
-    previewOgTitle: document.getElementById('previewOgTitle'),
-    previewOgDescription: document.getElementById('previewOgDescription'),
-    previewOgImage: document.getElementById('previewOgImage'),
-    previewDomain: document.getElementById('previewDomain')
-};
+class ToolHubBuilder {
+    constructor() {
+        this.toolsDir = path.join(__dirname, '..', 'tools');
+        this.outputDir = path.join(__dirname, '..', 'dist');
+        this.tools = [];
+    }
 
-// Schema field templates
-const schemaTemplates = {
-    Article: [
-        { id: 'articleHeadline', label: 'Headline', type: 'text', required: true },
-        { id: 'articleAuthor', label: 'Author', type: 'text', required: true },
-        { id: 'articleDatePublished', label: 'Date Published', type: 'date', required: true },
-        { id: 'articleDateModified', label: 'Date Modified', type: 'date' },
-        { id: 'articleImage', label: 'Image URL', type: 'url' }
-    ],
-    Product: [
-        { id: 'productName', label: 'Product Name', type: 'text', required: true },
-        { id: 'productBrand', label: 'Brand', type: 'text' },
-        { id: 'productPrice', label: 'Price', type: 'number', required: true },
-        { id: 'productCurrency', label: 'Currency', type: 'text', value: 'USD' },
-        { id: 'productAvailability', label: 'Availability', type: 'select', options: ['InStock', 'OutOfStock', 'PreOrder'] },
-        { id: 'productRating', label: 'Rating (1-5)', type: 'number', min: 1, max: 5 }
-    ],
-    Organization: [
-        { id: 'orgName', label: 'Organization Name', type: 'text', required: true },
-        { id: 'orgUrl', label: 'Website URL', type: 'url' },
-        { id: 'orgLogo', label: 'Logo URL', type: 'url' },
-        { id: 'orgDescription', label: 'Description', type: 'textarea' }
-    ],
-    LocalBusiness: [
-        { id: 'businessName', label: 'Business Name', type: 'text', required: true },
-        { id: 'businessAddress', label: 'Address', type: 'text', required: true },
-        { id: 'businessPhone', label: 'Phone', type: 'tel' },
-        { id: 'businessHours', label: 'Opening Hours', type: 'text', placeholder: 'Mo-Fr 09:00-17:00' }
-    ],
-    WebSite: [
-        { id: 'websiteName', label: 'Website Name', type: 'text', required: true },
-        { id: 'websiteUrl', label: 'Website URL', type: 'url', required: true },
-        { id: 'websiteDescription', label: 'Description', type: 'textarea' }
-    ]
-};
-
-// Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
-    initializeEventListeners();
-    initializeCharacterCounters();
-    updatePreview();
-});
-
-// Event Listeners
-function initializeEventListeners() {
-    // File upload events
-    elements.uploadArea.addEventListener('click', () => elements.fileInput.click());
-    elements.uploadArea.addEventListener('dragover', handleDragOver);
-    elements.uploadArea.addEventListener('dragleave', handleDragLeave);
-    elements.uploadArea.addEventListener('drop', handleDrop);
-    elements.fileInput.addEventListener('change', handleFileSelect);
-    
-    // Form events
-    elements.form.addEventListener('input', handleFormChange);
-    elements.schemaType.addEventListener('change', handleSchemaTypeChange);
-    
-    // Process button
-    elements.processBtn.addEventListener('click', processFile);
-}
-
-// Character counter initialization
-function initializeCharacterCounters() {
-    const counters = [
-        { element: elements.metaTitle, max: 60 },
-        { element: elements.metaDescription, max: 160 }
-    ];
-    
-    counters.forEach(counter => {
-        const updateCounter = () => {
-            const length = counter.element.value.length;
-            const counterElement = counter.element.nextElementSibling;
-            
-            counterElement.textContent = `${length}/${counter.max} characters`;
-            
-            // Update styling based on length
-            counterElement.classList.remove('warning', 'error');
-            if (length > counter.max * 0.9) {
-                counterElement.classList.add('warning');
-            }
-            if (length > counter.max) {
-                counterElement.classList.add('error');
-            }
-        };
+    // Scan the tools directory for available tools
+    async scanTools() {
+        console.log('🔍 Scanning for tools...');
         
-        counter.element.addEventListener('input', updateCounter);
-        updateCounter(); // Initial call
-    });
-}
+        if (!fs.existsSync(this.toolsDir)) {
+            console.log('⚠️  Tools directory not found, creating it...');
+            fs.mkdirSync(this.toolsDir, { recursive: true });
+            this.createExampleTool();
+        }
 
-// File upload handlers
-function handleDragOver(e) {
-    e.preventDefault();
-    elements.uploadArea.classList.add('dragover');
-}
+        const toolDirs = fs.readdirSync(this.toolsDir, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name);
 
-function handleDragLeave(e) {
-    e.preventDefault();
-    elements.uploadArea.classList.remove('dragover');
-}
+        for (const toolDir of toolDirs) {
+            const toolPath = path.join(this.toolsDir, toolDir);
+            const configPath = path.join(toolPath, 'config.json');
+            const indexPath = path.join(toolPath, 'index.html');
 
-function handleDrop(e) {
-    e.preventDefault();
-    elements.uploadArea.classList.remove('dragover');
-    
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-        handleFile(files[0]);
+            // Check if tool has required files
+            if (fs.existsSync(configPath) && fs.existsSync(indexPath)) {
+                try {
+                    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                    const tool = {
+                        id: toolDir,
+                        path: `/tools/${toolDir}`,
+                        indexPath: indexPath,
+                        ...config
+                    };
+                    
+                    // Validate required fields
+                    if (this.validateTool(tool)) {
+                        this.tools.push(tool);
+                        console.log(`✅ Found tool: ${tool.name}`);
+                    } else {
+                        console.log(`❌ Invalid tool config: ${toolDir}`);
+                    }
+                } catch (error) {
+                    console.log(`❌ Error reading config for ${toolDir}:`, error.message);
+                }
+            } else {
+                console.log(`⚠️  Skipping ${toolDir}: missing config.json or index.html`);
+            }
+        }
+
+        console.log(`📊 Found ${this.tools.length} valid tools`);
+        return this.tools;
+    }
+
+    // Validate tool configuration
+    validateTool(tool) {
+        const required = ['name', 'description', 'icon', 'status'];
+        return required.every(field => tool[field] !== undefined);
+    }
+
+    // Generate the tools manifest
+    generateManifest() {
+        const manifest = {
+            version: '1.0.0',
+            generated: new Date().toISOString(),
+            tools: this.tools.map(tool => ({
+                id: tool.id,
+                name: tool.name,
+                description: tool.description,
+                icon: tool.icon,
+                status: tool.status,
+                path: tool.path,
+                category: tool.category || 'utility',
+                tags: tool.tags || []
+            }))
+        };
+
+        return manifest;
+    }
+
+    // Build the main index.html with dynamic tool loading
+    async buildIndex() {
+        console.log('🏗️  Building main index.html...');
+        
+        const indexTemplate = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+        const manifest = this.generateManifest();
+
+        // Inject tools data into the HTML
+        const toolsData = `
+        <script>
+        // Auto-generated tools data
+        window.TOOLS_MANIFEST = ${JSON.stringify(manifest, null, 2)};
+        </script>`;
+
+        // Insert before closing head tag
+        const updatedIndex = indexTemplate.replace('</head>', `${toolsData}\n</head>`);
+
+        // Ensure output directory exists
+        if (!fs.existsSync(this.outputDir)) {
+            fs.mkdirSync(this.outputDir, { recursive: true });
+        }
+
+        // Write the updated index.html
+        fs.writeFileSync(path.join(this.outputDir, 'index.html'), updatedIndex);
+        console.log('✅ Built index.html');
+    }
+
+    // Copy tools to output directory
+    async copyTools() {
+        console.log('📁 Copying tools...');
+        
+        const toolsOutput = path.join(this.outputDir, 'tools');
+        if (!fs.existsSync(toolsOutput)) {
+            fs.mkdirSync(toolsOutput, { recursive: true });
+        }
+
+        for (const tool of this.tools) {
+            const sourcePath = path.join(this.toolsDir, tool.id);
+            const destPath = path.join(toolsOutput, tool.id);
+            
+            this.copyDirectorySync(sourcePath, destPath);
+            console.log(`📋 Copied ${tool.name}`);
+        }
+    }
+
+    // Utility function to copy directories recursively
+    copyDirectorySync(src, dest) {
+        if (!fs.existsSync(dest)) {
+            fs.mkdirSync(dest, { recursive: true });
+        }
+
+        const files = fs.readdirSync(src);
+        
+        for (const file of files) {
+            const srcPath = path.join(src, file);
+            const destPath = path.join(dest, file);
+            const stat = fs.statSync(srcPath);
+
+            if (stat.isDirectory()) {
+                this.copyDirectorySync(srcPath, destPath);
+            } else {
+                fs.copyFileSync(srcPath, destPath);
+            }
+        }
+    }
+
+    // Create an example tool for demonstration
+    createExampleTool() {
+        const exampleToolDir = path.join(this.toolsDir, 'example-calculator');
+        
+        if (!fs.existsSync(exampleToolDir)) {
+            fs.mkdirSync(exampleToolDir, { recursive: true });
+
+            // Create config.json
+            const config = {
+                name: "Simple Calculator",
+                description: "A basic calculator for quick mathematical operations.",
+                icon: "🧮",
+                status: "active",
+                category: "utility",
+                tags: ["math", "calculator", "utility"]
+            };
+
+            fs.writeFileSync(
+                path.join(exampleToolDir, 'config.json'),
+                JSON.stringify(config, null, 2)
+            );
+
+            // Create index.html
+            const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Calculator</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            max-width: 400px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: #f8fafc;
+        }
+        .calculator {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .display {
+            width: 100%;
+            height: 60px;
+            font-size: 2rem;
+            text-align: right;
+            padding: 0 1rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            background: #f8fafc;
+        }
+        .buttons {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.5rem;
+        }
+        button {
+            height: 60px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.2rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .number, .operator {
+            background: #f1f5f9;
+            color: #334155;
+        }
+        .number:hover, .operator:hover {
+            background: #e2e8f0;
+        }
+        .equals {
+            background: #6366f1;
+            color: white;
+        }
+        .equals:hover {
+            background: #4f46e5;
+        }
+        .clear {
+            background: #ef4444;
+            color: white;
+        }
+        .clear:hover {
+            background: #dc2626;
+        }
+    </style>
+</head>
+<body>
+    <div class="calculator">
+        <h2>🧮 Simple Calculator</h2>
+        <input type="text" class="display" id="display" readonly>
+        <div class="buttons">
+            <button class="clear" onclick="clearDisplay()">C</button>
+            <button class="operator" onclick="appendToDisplay('/')">/</button>
+            <button class="operator" onclick="appendToDisplay('*')">×</button>
+            <button class="operator" onclick="deleteLast()">⌫</button>
+            <button class="number" onclick="appendToDisplay('7')">7</button>
+            <button class="number" onclick="appendToDisplay('8')">8</button>
+            <button class="number" onclick="appendToDisplay('9')">9</button>
+            <button class="operator" onclick="appendToDisplay('-')">-</button>
+            <button class="number" onclick="appendToDisplay('4')">4</button>
+            <button class="number" onclick="appendToDisplay('5')">5</button>
+            <button class="number" onclick="appendToDisplay('6')">6</button>
+            <button class="operator" onclick="appendToDisplay('+')">+</button>
+            <button class="number" onclick="appendToDisplay('1')">1</button>
+            <button class="number" onclick="appendToDisplay('2')">2</button>
+            <button class="number" onclick="appendToDisplay('3')">3</button>
+            <button class="equals" onclick="calculate()" rowspan="2">=</button>
+            <button class="number" onclick="appendToDisplay('0')" colspan="2">0</button>
+            <button class="number" onclick="appendToDisplay('.')">.</button>
+        </div>
+    </div>
+
+    <script>
+        let display = document.getElementById('display');
+        
+        function appendToDisplay(value) {
+            display.value += value;
+        }
+        
+        function clearDisplay() {
+            display.value = '';
+        }
+        
+        function deleteLast() {
+            display.value = display.value.slice(0, -1);
+        }
+        
+        function calculate() {
+            try {
+                // Replace × with * for calculation
+                let expression = display.value.replace(/×/g, '*');
+                let result = eval(expression);
+                display.value = result;
+            } catch (error) {
+                display.value = 'Error';
+                setTimeout(() => clearDisplay(), 1500);
+            }
+        }
+        
+        // Keyboard support
+        document.addEventListener('keydown', function(event) {
+            const key = event.key;
+            if ('0123456789+-*/.'.includes(key)) {
+                appendToDisplay(key === '*' ? '×' : key);
+            } else if (key === 'Enter' || key === '=') {
+                calculate();
+            } else if (key === 'Escape' || key === 'c' || key === 'C') {
+                clearDisplay();
+            } else if (key === 'Backspace') {
+                deleteLast();
+            }
+        });
+    </script>
+</body>
+</html>`;
+
+            fs.writeFileSync(path.join(exampleToolDir, 'index.html'), html);
+            console.log('📝 Created example calculator tool');
+        }
+    }
+
+    // Generate a README with instructions
+    generateReadme() {
+        const readme = `# Tool Hub
+
+A dynamic collection of web tools and utilities.
+
+## Adding New Tools
+
+To add a new tool to the hub:
+
+1. Create a new directory in the \`tools/\` folder with your tool name (e.g., \`tools/my-awesome-tool/\`)
+
+2. Create a \`config.json\` file with the following structure:
+\`\`\`json
+{
+  "name": "My Awesome Tool",
+  "description": "A brief description of what your tool does",
+  "icon": "🚀",
+  "status": "active",
+  "category": "utility",
+  "tags": ["tag1", "tag2"]
+}
+\`\`\`
+
+3. Create an \`index.html\` file with your tool's interface and functionality
+
+4. Run the build script: \`npm run build\`
+
+## Configuration Options
+
+### Status Values
+- \`active\`: Tool is fully functional
+- \`beta\`: Tool is in beta testing
+- \`coming-soon\`: Tool is planned but not yet available
+
+### Categories
+- \`utility\`: General utilities
+- \`developer\`: Developer tools
+- \`design\`: Design and creative tools
+- \`productivity\`: Productivity tools
+- \`converter\`: File/data converters
+
+## Build Process
+
+The build script will:
+1. Scan the \`tools/\` directory for valid tools
+2. Generate a manifest with all available tools
+3. Build the main index.html with dynamic tool loading
+4. Copy all tools to the output directory
+
+## Directory Structure
+
+\`\`\`
+tool-hub/
+├── index.html          # Main hub page
+├── tools/              # Individual tools
+│   ├── tool-name/
+│   │   ├── config.json # Tool metadata
+│   │   └── index.html  # Tool interface
+├── scripts/
+│   └── build.js        # Build automation
+└── dist/               # Built output
+\`\`\`
+
+## Development
+
+1. Install dependencies: \`npm install\`
+2. Create your tools in the \`tools/\` directory
+3. Build the project: \`npm run build\`
+4. Serve the \`dist/\` directory
+
+Happy building! 🛠️
+`;
+
+        fs.writeFileSync(path.join(__dirname, '..', 'README.md'), readme);
+        console.log('📚 Generated README.md');
+    }
+
+    // Main build process
+    async build() {
+        console.log('🚀 Starting Tool Hub build process...\n');
+        
+        try {
+            await this.scanTools();
+            await this.buildIndex();
+            await this.copyTools();
+            this.generateReadme();
+            
+            console.log('\n✅ Build completed successfully!');
+            console.log(`📊 Built ${this.tools.length} tools`);
+            console.log(`📁 Output directory: ${this.outputDir}`);
+            
+            // Generate manifest file for external use
+            const manifest = this.generateManifest();
+            fs.writeFileSync(
+                path.join(this.outputDir, 'manifest.json'),
+                JSON.stringify(manifest, null, 2)
+            );
+            console.log('📋 Generated manifest.json');
+            
+        } catch (error) {
+            console.error('❌ Build failed:', error);
+            process.exit(1);
+        }
+    }
+
+    // Development server (basic)
+    serve(port = 3000) {
+        const http = require('http');
+        const url = require('url');
+        const mime = require('mime-types');
+
+        const server = http.createServer((req, res) => {
+            const parsedUrl = url.parse(req.url);
+            let pathname = parsedUrl.pathname;
+            
+            // Default to index.html
+            if (pathname === '/') {
+                pathname = '/index.html';
+            }
+            
+            const filePath = path.join(this.outputDir, pathname);
+            
+            fs.readFile(filePath, (err, data) => {
+                if (err) {
+                    res.writeHead(404);
+                    res.end('File not found');
+                    return;
+                }
+                
+                const mimeType = mime.lookup(filePath) || 'text/html';
+                res.writeHead(200, { 'Content-Type': mimeType });
+                res.end(data);
+            });
+        });
+        
+        server.listen(port, () => {
+            console.log(`🌐 Development server running at http://localhost:${port}`);
+        });
     }
 }
 
-function handleFileSelect(e) {
-    const file = e.target.files[0];
-    if (file) {
-        handleFile(file);
-    }
-}
-
-function handleFile(file) {
-    if (!file.type.includes('text/html') && !file.name.endsWith('.html') && !file.name.endsWith('.htm')) {
-        showStatus('Please select a valid HTML file.', 'error');
-        return;
-    }
+// CLI interface
+if (require.main === module) {
+    const builder = new ToolHubBuilder();
+    const command = process.argv[2];
     
-    uploadedFile = file;
-    
-    // Update file info
-    elements.fileName.textContent = file.name;
-    elements.fileSize.textContent = formatFileSize(file.size);
-    elements.fileInfo.style.display = 'block';
-    
-    // Enable process button
-    elements.processBtn.disabled = false;
-    
-    showStatus('HTML file loaded successfully!', 'success');
-}
-
-// Form handling
-function handleFormChange() {
-    currentFormData = collectFormData();
-    updatePreview();
-}
-
-function handleSchemaTypeChange() {
-    const schemaType = elements.schemaType.value;
-    const schemaFieldsContainer = elements.schemaFields;
-    
-    if (schemaType === 'none') {
-        schemaFieldsContainer.style.display = 'none';
-        return;
-    }
-    
-    const template = schemaTemplates[schemaType];
-    if (!template) return;
-    
-    // Generate schema fields
-    let html = `<h4>Configure ${schemaType} Data</h4>`;
-    template.forEach(field => {
-        html += generateSchemaField(field);
-    });
-    
-    schemaFieldsContainer.innerHTML = html;
-    schemaFieldsContainer.style.display = 'block';
-    
-    // Add event listeners to new fields
-    schemaFieldsContainer.addEventListener('input', handleFormChange);
-}
-
-function generateSchemaField(field) {
-    const required = field.required ? ' required' : '';
-    const value = field.value ? ` value="${field.value}"` : '';
-    const placeholder = field.placeholder ? ` placeholder="${field.placeholder}"` : '';
-    const min = field.min ? ` min="${field.min}"` : '';
-    const max = field.max ? ` max="${field.max}"` : '';
-    
-    let input = '';
-    
-    switch (field.type) {
-        case 'textarea':
-            input = `<textarea id="${field.id}"${placeholder}${required}></textarea>`;
+    switch (command) {
+        case 'build':
+            builder.build();
             break;
-        case 'select':
-            const options = field.options.map(opt => `<option value="${opt}">${opt}</option>`).join('');
-            input = `<select id="${field.id}"${required}>${options}</select>`;
+        case 'serve':
+            const port = process.argv[3] || 3000;
+            builder.build().then(() => {
+                builder.serve(port);
+            });
+            break;
+        case 'scan':
+            builder.scanTools().then(tools => {
+                console.log('Found tools:', tools.map(t => t.name));
+            });
             break;
         default:
-            input = `<input type="${field.type}" id="${field.id}"${value}${placeholder}${min}${max}${required}>`;
-    }
-    
-    return `
-        <div class="form-group">
-            <label for="${field.id}">${field.label}${field.required ? ' *' : ''}</label>
-            ${input}
-        </div>
-    `;
-}
-
-// Data collection
-function collectFormData() {
-    const data = {};
-    
-    // Basic form fields
-    const fields = [
-        'metaTitle', 'metaDescription', 'keywords', 'canonicalUrl', 'language',
-        'ogTitle', 'ogDescription', 'ogImage', 'ogType',
-        'twitterCard', 'twitterSite', 'schemaType', 'robots', 'author'
-    ];
-    
-    fields.forEach(field => {
-        const element = document.getElementById(field);
-        if (element) {
-            data[field] = element.value.trim();
-        }
-    });
-    
-    // Collect schema-specific fields
-    if (data.schemaType && data.schemaType !== 'none') {
-        const template = schemaTemplates[data.schemaType];
-        if (template) {
-            data.schemaData = {};
-            template.forEach(field => {
-                const element = document.getElementById(field.id);
-                if (element) {
-                    data.schemaData[field.id] = element.value.trim();
-                }
-            });
-        }
-    }
-    
-    return data;
-}
-
-// Preview updates
-function updatePreview() {
-    const data = currentFormData;
-    
-    // Google preview
-    elements.previewTitle.textContent = data.metaTitle || 'Your Page Title';
-    elements.previewDescription.textContent = data.metaDescription || 'Your meta description will appear here...';
-    
-    if (data.canonicalUrl) {
-        try {
-            elements.previewUrl.textContent = data.canonicalUrl;
-            const domain = new URL(data.canonicalUrl).hostname.toUpperCase();
-            elements.previewDomain.textContent = domain;
-        } catch (e) {
-            elements.previewUrl.textContent = 'https://example.com';
-            elements.previewDomain.textContent = 'EXAMPLE.COM';
-        }
-    } else {
-        elements.previewUrl.textContent = 'https://example.com';
-        elements.previewDomain.textContent = 'EXAMPLE.COM';
-    }
-    
-    // Facebook preview
-    elements.previewOgTitle.textContent = data.ogTitle || data.metaTitle || 'Your Page Title';
-    elements.previewOgDescription.textContent = data.ogDescription || data.metaDescription || 'Your description...';
-    
-    if (data.ogImage) {
-        elements.previewOgImage.style.backgroundImage = `url(${data.ogImage})`;
-        elements.previewOgImage.textContent = '';
-    } else {
-        elements.previewOgImage.style.backgroundImage = '';
-        elements.previewOgImage.textContent = 'No image selected';
-    }
-    
-    // Show preview section
-    elements.previewSection.style.display = 'block';
-}
-
-// File processing - FIXED VERSION
-async function processFile() {
-    if (!uploadedFile) {
-        showStatus('Please select an HTML file first.', 'error');
-        return;
-    }
-    
-    const formData = collectFormData();
-    
-    // Validate required fields
-    if (!formData.metaTitle || !formData.metaDescription) {
-        showStatus('Please fill in the required fields (Meta Title and Meta Description).', 'error');
-        return;
-    }
-    
-    elements.processBtn.disabled = true;
-    elements.processBtn.classList.add('processing');
-    elements.processBtn.textContent = 'Processing...';
-    
-    try {
-        // Use FileReader API instead of window.fs.readFile
-        const fileContent = await readFileAsText(uploadedFile);
-        const enhancedHtml = injectSEOMetadata(fileContent, formData);
-        
-        // Download the enhanced file
-        downloadFile(enhancedHtml, getEnhancedFileName(uploadedFile.name));
-        
-        showStatus('SEO metadata successfully injected! File downloaded.', 'success');
-        
-    } catch (error) {
-        console.error('Processing error:', error);
-        showStatus('Error processing file: ' + error.message, 'error');
-    } finally {
-        elements.processBtn.disabled = false;
-        elements.processBtn.classList.remove('processing');
-        elements.processBtn.textContent = 'Process & Download Enhanced HTML';
-    }
-}
-
-// FIXED: File reading using standard FileReader API
-function readFileAsText(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        
-        reader.onload = function(event) {
-            resolve(event.target.result);
-        };
-        
-        reader.onerror = function() {
-            reject(new Error('Failed to read file'));
-        };
-        
-        reader.readAsText(file);
-    });
-}
-
-// SEO metadata injection
-function injectSEOMetadata(htmlContent, data) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlContent, 'text/html');
-    
-    let head = doc.querySelector('head');
-    if (!head) {
-        head = doc.createElement('head');
-        doc.documentElement.insertBefore(head, doc.body);
-    }
-    
-    // Remove existing SEO meta tags to avoid duplicates
-    removeSEOTags(head);
-    
-    // Inject new SEO metadata
-    const seoHTML = generateSEOMetadata(data);
-    const tempDiv = doc.createElement('div');
-    tempDiv.innerHTML = seoHTML;
-    
-    // Add each element to head
-    while (tempDiv.firstChild) {
-        head.appendChild(tempDiv.firstChild);
-    }
-    
-    // Update or add lang attribute
-    if (data.language) {
-        doc.documentElement.setAttribute('lang', data.language);
-    }
-    
-    return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
-}
-
-// Remove existing SEO tags
-function removeSEOTags(head) {
-    const selectors = [
-        'meta[name="description"]',
-        'meta[name="keywords"]',
-        'meta[name="author"]',
-        'meta[name="robots"]',
-        'meta[property^="og:"]',
-        'meta[name^="twitter:"]',
-        'link[rel="canonical"]',
-        'script[type="application/ld+json"]',
-        'title'
-    ];
-    
-    selectors.forEach(selector => {
-        const elements = head.querySelectorAll(selector);
-        elements.forEach(el => el.remove());
-    });
-}
-
-// Generate SEO metadata HTML
-function generateSEOMetadata(data) {
-    let html = '';
-    
-    // Title
-    html += `    <title>${escapeHtml(data.metaTitle)}</title>\n`;
-    
-    // Basic meta tags
-    html += `    <meta name="description" content="${escapeHtml(data.metaDescription)}">\n`;
-    
-    if (data.keywords) {
-        html += `    <meta name="keywords" content="${escapeHtml(data.keywords)}">\n`;
-    }
-    
-    if (data.author) {
-        html += `    <meta name="author" content="${escapeHtml(data.author)}">\n`;
-    }
-    
-    html += `    <meta name="robots" content="${data.robots || 'index, follow'}">\n`;
-    
-    // Canonical URL
-    if (data.canonicalUrl) {
-        html += `    <link rel="canonical" href="${escapeHtml(data.canonicalUrl)}">\n`;
-    }
-    
-    // Open Graph tags
-    html += `    <meta property="og:title" content="${escapeHtml(data.ogTitle || data.metaTitle)}">\n`;
-    html += `    <meta property="og:description" content="${escapeHtml(data.ogDescription || data.metaDescription)}">\n`;
-    html += `    <meta property="og:type" content="${data.ogType || 'website'}">\n`;
-    
-    if (data.ogImage) {
-        html += `    <meta property="og:image" content="${escapeHtml(data.ogImage)}">\n`;
-    }
-    
-    if (data.canonicalUrl) {
-        html += `    <meta property="og:url" content="${escapeHtml(data.canonicalUrl)}">\n`;
-    }
-    
-    // Twitter Card tags
-    html += `    <meta name="twitter:card" content="${data.twitterCard || 'summary'}">\n`;
-    html += `    <meta name="twitter:title" content="${escapeHtml(data.ogTitle || data.metaTitle)}">\n`;
-    html += `    <meta name="twitter:description" content="${escapeHtml(data.ogDescription || data.metaDescription)}">\n`;
-    
-    if (data.twitterSite) {
-        html += `    <meta name="twitter:site" content="${escapeHtml(data.twitterSite)}">\n`;
-    }
-    
-    if (data.ogImage) {
-        html += `    <meta name="twitter:image" content="${escapeHtml(data.ogImage)}">\n`;
-    }
-    
-    // Structured Data (JSON-LD)
-    if (data.schemaType && data.schemaType !== 'none' && data.schemaData) {
-        const jsonLd = generateJSONLD(data.schemaType, data.schemaData, data);
-        html += `    <script type="application/ld+json">\n${jsonLd}\n    </script>\n`;
-    }
-    
-    return html;
-}
-
-// Generate JSON-LD structured data
-function generateJSONLD(schemaType, schemaData, globalData) {
-    let jsonLd = {
-        "@context": "https://schema.org",
-        "@type": schemaType
-    };
-    
-    switch (schemaType) {
-        case 'Article':
-            jsonLd = {
-                ...jsonLd,
-                headline: schemaData.articleHeadline || globalData.metaTitle,
-                author: {
-                    "@type": "Person",
-                    name: schemaData.articleAuthor
-                },
-                datePublished: schemaData.articleDatePublished,
-                dateModified: schemaData.articleDateModified || schemaData.articleDatePublished
-            };
-            
-            if (schemaData.articleImage) {
-                jsonLd.image = schemaData.articleImage;
-            }
-            break;
-            
-        case 'Product':
-            jsonLd = {
-                ...jsonLd,
-                name: schemaData.productName,
-                brand: {
-                    "@type": "Brand",
-                    name: schemaData.productBrand
-                },
-                offers: {
-                    "@type": "Offer",
-                    price: schemaData.productPrice,
-                    priceCurrency: schemaData.productCurrency || 'USD',
-                    availability: `https://schema.org/${schemaData.productAvailability || 'InStock'}`
-                }
-            };
-            
-            if (schemaData.productRating) {
-                jsonLd.aggregateRating = {
-                    "@type": "AggregateRating",
-                    ratingValue: schemaData.productRating,
-                    ratingCount: "1"
-                };
-            }
-            break;
-            
-        case 'Organization':
-            jsonLd = {
-                ...jsonLd,
-                name: schemaData.orgName,
-                url: schemaData.orgUrl,
-                logo: schemaData.orgLogo,
-                description: schemaData.orgDescription
-            };
-            break;
-            
-        case 'LocalBusiness':
-            jsonLd = {
-                ...jsonLd,
-                name: schemaData.businessName,
-                address: {
-                    "@type": "PostalAddress",
-                    streetAddress: schemaData.businessAddress
-                },
-                telephone: schemaData.businessPhone,
-                openingHours: schemaData.businessHours
-            };
-            break;
-            
-        case 'WebSite':
-            jsonLd = {
-                ...jsonLd,
-                name: schemaData.websiteName,
-                url: schemaData.websiteUrl,
-                description: schemaData.websiteDescription
-            };
+            console.log('Usage: node build.js [build|serve|scan]');
             break;
     }
-    
-    return JSON.stringify(jsonLd, null, 2);
 }
 
-// Utility functions
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function getEnhancedFileName(originalName) {
-    const nameWithoutExt = originalName.replace(/\.[^/.]+$/, '');
-    const ext = originalName.split('.').pop();
-    return `${nameWithoutExt}_seo_enhanced.${ext}`;
-}
-
-function downloadFile(content, filename) {
-    const blob = new Blob([content], { type: 'text/html' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-}
-
-function showStatus(message, type = 'info') {
-    elements.statusMessage.textContent = message;
-    elements.statusMessage.className = `status-message ${type}`;
-    elements.statusMessage.style.display = 'block';
-    
-    // Auto-hide after 5 seconds for success messages
-    if (type === 'success') {
-        setTimeout(() => {
-            elements.statusMessage.style.display = 'none';
-        }, 5000);
-    }
-}
-
-// Initialize form data on load
-currentFormData = collectFormData();
+module.exports = ToolHubBuilder;
