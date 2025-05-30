@@ -110,6 +110,32 @@ function renderTools() {
     });
 }
 
+// Helper function to process CSS @import statements
+async function processImports(cssText, baseUrl) {
+    const importRegex = /@import\s+(?:url\()?['"]?([^'"()]+)['"]?\)?[^;]*;/g;
+    let match;
+    const promises = [];
+    
+    while ((match = importRegex.exec(cssText)) !== null) {
+        const importUrl = new URL(match[1], baseUrl).href;
+        promises.push(
+            fetch(importUrl)
+                .then(response => response.ok ? response.text() : '')
+                .then(importedCss => ({ original: match[0], replacement: importedCss }))
+                .catch(() => ({ original: match[0], replacement: '' }))
+        );
+    }
+    
+    const results = await Promise.all(promises);
+    let processedCss = cssText;
+    
+    results.forEach(result => {
+        processedCss = processedCss.replace(result.original, result.replacement);
+    });
+    
+    return processedCss;
+}
+
 // Tool opening - Fixed for CSS loading
 function openTool(tool) {
     const toolView = document.getElementById('tool-view');
@@ -146,29 +172,60 @@ function openTool(tool) {
     // Remove sandbox entirely to allow full CSS/JS loading
     iframe.style.cssText = 'width: 100%; height: 600px; border: none; border-radius: 8px; background: #fff;';
     
-    // Add base tag injection to fix relative paths
-    iframe.onload = function() {
+    // Alternative approach: Load and inject CSS directly
+    iframe.onload = async function() {
         try {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-            if (iframeDoc && iframeDoc.head) {
-                // Check if base tag already exists
-                if (!iframeDoc.querySelector('base')) {
-                    const base = iframeDoc.createElement('base');
-                    const currentUrl = new URL(iframe.src, window.location.href);
-                    base.href = currentUrl.href.substring(0, currentUrl.href.lastIndexOf('/') + 1);
-                    iframeDoc.head.insertBefore(base, iframeDoc.head.firstChild);
+            if (iframeDoc) {
+                // Find all CSS links in the iframe
+                const links = iframeDoc.querySelectorAll('link[rel="stylesheet"]');
+                
+                for (const link of links) {
+                    try {
+                        // Get the original href
+                        const originalHref = link.getAttribute('href');
+                        if (!originalHref) continue;
+                        
+                        // Create absolute URL for CSS file
+                        let cssUrl;
+                        if (originalHref.startsWith('http') || originalHref.startsWith('//')) {
+                            cssUrl = originalHref;
+                        } else {
+                            // Make relative path absolute based on tool location
+                            const toolBaseUrl = iframe.src.substring(0, iframe.src.lastIndexOf('/') + 1);
+                            cssUrl = new URL(originalHref, toolBaseUrl).href;
+                        }
+                        
+                        // Fetch the CSS content
+                        const response = await fetch(cssUrl);
+                        if (response.ok) {
+                            const cssText = await response.text();
+                            
+                            // Create a new style element with the CSS content
+                            const styleEl = iframeDoc.createElement('style');
+                            styleEl.textContent = cssText;
+                            
+                            // Replace the link with the style element
+                            link.parentNode.replaceChild(styleEl, link);
+                        } else {
+                            console.warn(`Failed to load CSS: ${cssUrl}`);
+                        }
+                    } catch (cssError) {
+                        console.warn('Error processing CSS link:', cssError);
+                    }
                 }
                 
-                // Force style recalculation
-                const links = iframeDoc.querySelectorAll('link[rel="stylesheet"]');
-                links.forEach(link => {
-                    const href = link.href;
-                    link.href = '';
-                    setTimeout(() => link.href = href, 1);
-                });
+                // Also handle any @import statements in existing style tags
+                const styleTags = iframeDoc.querySelectorAll('style');
+                for (const styleTag of styleTags) {
+                    if (styleTag.textContent.includes('@import')) {
+                        const toolBaseUrl = iframe.src.substring(0, iframe.src.lastIndexOf('/') + 1);
+                        styleTag.textContent = await processImports(styleTag.textContent, toolBaseUrl);
+                    }
+                }
             }
         } catch (e) {
-            console.warn('Could not inject base tag (cross-origin):', e.message);
+            console.warn('Could not fix CSS loading:', e.message);
         }
     };
     
