@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" type="text/css" href="style.css">
+
+  <!-- Custom Favicons -->
+  <link rel="icon" type="image/x-icon" href="icons/favicon.ico">
+  <link rel="icon" type="image/x-icon" sizes="16x16" href="icons/favicon-16x16.ico">
+  <link rel="icon" type="image/x-icon" sizes="48x48" href="icons/favicon-48x48.ico">
+  <link rel="icon" type="image/x-icon" sizes="64x64" href="icons/favicon-64x64.ico">
+  <link rel="icon" type="image/x-icon" sizes="96x96" href="icons/favicon-96x96.ico">
+  <link rel="icon" type="image/x-icon" sizes="128x128" href="icons/favicon-128x128.ico">
+  <!-- Apple Touch Icons -->
+  <meta name="msapplication-TileColor" content="#667eea">
+  <meta name="theme-color" content="#667eea">
+  <title>Icon Generator 3000 – Create Favicons in All Sizes Instantly</title>
+  <meta name="description"
+    content="Create favicons in multiple sizes &amp; formats with HTML output. Icon Generator 3000 makes branding fast, easy, and professional. Try it now!">
+  <meta name="keywords"
+    content="favicon generator, favicon creator, html output, responsive icons, web app favicons, icon generator 3000, seo, html, optimization">
+  <meta name="author" content="Seth Keddy">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://icongenerator3000.snap-view.com/">
+  <meta property="og:title" content="Icon Generator 3000 – Create Favicons in All Sizes Instantly">
+  <meta property="og:description"
+    content="Create favicons in multiple sizes &amp; formats with HTML output. Icon Generator 3000 makes branding fast, easy, and professional. Try it now!">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://icongenerator3000.snap-view.com/icons/IconGenerator3000.png">
+  <meta property="og:url" content="https://icongenerator3000.snap-view.com/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Icon Generator 3000 – Create Favicons in All Sizes Instantly">
+  <meta name="twitter:description"
+    content="Create favicons in multiple sizes &amp; formats with HTML output. Icon Generator 3000 makes branding fast, easy, and professional. Try it now!">
+  <meta name="twitter:image" content="https://icongenerator3000.snap-view.com/icons/IconGenerator3000.png">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "Icon Generator 3000",
+  "url": "https://icongenerator3000.snap-view.com/",
+  "description": "Create favicons in multiple sizes & formats with HTML output. Icon Generator 3000 makes branding fast, easy, and professional."
+}
+    </script>
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <h1><i class="fas fa-star"></i>Icon Generator 3000</h1>
+      <p><strong>Icon Generator 3000</strong> is your all-in-one tool to create professional favicons for websites,
+        apps, and progressive web apps (PWAs).</p>
+
+      <p>Generate icons in all standard sizes and formats including <code>.ico</code>, <code>.png</code>, and
+        <code>.svg</code>. Whether you need favicons for desktops, mobile browsers, or app icons, we've got you covered.
+      </p>
+
+      <p>Our favicon maker also provides ready-to-use HTML code for seamless integration into your website. No need to
+        guess which meta tags or link elements are required—we handle it for you.</p>
+
+      <p>Whether you're a web developer, designer, or business owner, <strong>Icon Generator 3000</strong> helps you
+        deliver a polished, branded user experience across all platforms.</p>
+
+      <p><strong>No design skills required!</strong> Start generating favicons in seconds and give your site a
+        professional, cohesive look.</p>
+    </div>
+    <div class="main-panel">
+      <div class="upload-section">
+        <div class="upload-area" onclick="document.getElementById('imageInput').click()">
+          <div class="upload-icon">
+            <i class="fas fa-cloud-upload-alt"></i>
+          </div>
+          <div class="upload-text">Drop your image here or click to browse</div>
+          <div class="upload-subtext">Supports PNG, JPG, SVG, WebP • Max 10MB</div>
+        </div>
+        <input type="file" id="imageInput" accept="image/*">
+      </div>
+      <div class="controls">
+        <div class="control-group">
+          <label>Output Strategy</label>
+          <select id="strategySelect">
+            <option value="standard">Standard Sizes (16-256px)</option>
+            <option value="web">Web Optimized (16, 32, 48, 180, 192)</option>
+            <option value="app">App Icons (57-1024px)</option>
+            <option value="custom">Custom Sizes</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Output Formats</label>
+          <div class="format-selector">
+            <div class="format-btn active" data-format="png">
+              <i class="fas fa-image"></i> PNG
+            </div>
+            <div class="format-btn active" data-format="ico">
+              <i class="fas fa-cube"></i> ICO
+            </div>
+            <div class="format-btn" data-format="svg">
+              <i class="fas fa-vector-square"></i> SVG
+            </div>
+            <div class="format-btn" data-format="webp">
+              <i class="fas fa-compress"></i> WebP
+            </div>
+          </div>
+        </div>
+        <div class="control-group full-width">
+          <label>File Path &amp; Name Configuration</label>
+          <div class="path-filename-group">
+            <div class="path-selector">
+              <select id="pathSelect">
+                <option value="">Root Directory (/)</option>
+                <option value="icons/">icons/</option>
+                <option value="assets/">assets/</option>
+                <option value="images/">images/</option>
+                <option value="static/">static/</option>
+                <option value="public/">public/</option>
+                <option value="custom">Custom Path...</option>
+              </select>
+            </div>
+            <div class="filename-input">
+              <input type="text" id="customFilenameInput" placeholder="favicon" value="favicon">
+            </div>
+          </div>
+          <input type="text" id="customPathInput" placeholder="Enter custom path (e.g., assets/icons/)"
+            style="display: none; margin-top: 10px;">
+        </div>
+        <div class="control-group full-width">
+          <div class="checkbox-group">
+            <input type="checkbox" id="includeGreyedOut">
+            <label for="includeGreyedOut">Also generate greyed-out/disabled versions</label>
+          </div>
+        </div>
+      </div>
+      <div class="control-group" id="customSizes" style="display: none;">
+        <label>Custom Sizes (comma-separated)</label>
+        <input type="text" id="customSizesInput" placeholder="16, 32, 48, 64, 128, 256">
+      </div>
+      <button class="generate-btn" id="generateBtn">
+        <i class="fas fa-magic"></i> Generate Favicons
+      </button>
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+    <div class="preview-section" id="previewSection" style="display: none;">
+      <div class="main-panel">
+        <h2 style="text-align: center; margin-bottom: 30px; color: #374151;">
+          <i class="fas fa-eye"></i> Preview
+        </h2>
+        <div class="preview-grid" id="previewGrid"></div>
+        <div class="download-section">
+          <a class="download-btn" id="downloadBtn" style="display: none;">
+            <i class="fas fa-download"></i> Download ZIP Archive
+          </a>
+        </div>
+        <!-- HTML Code Generation Section -->
+        <div class="html-code-section" id="htmlCodeSection" style="display: none;">
+          <h3 style="text-align: center; margin: 30px 0 20px 0; color: #374151;">
+            <i class="fas fa-code"></i> Generated HTML Code
+          </h3>
+          <div class="code-container">
+            <div class="code-header">
+              <span class="code-title">Copy this code to your HTML &lt;head&gt; section:</span>
+              <button class="copy-btn" id="copyCodeBtn">
+                <i class="fas fa-copy"></i> Copy Code
+              </button>
+            </div>
+            <textarea id="htmlCodeOutput" readonly="" placeholder="Generated HTML code will appear here..."></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
