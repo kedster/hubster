@@ -1,0 +1,9 @@
+{
+  "name": "Icon Generator 3000",
+  "description": "Generate high-quality icons from text.",
+  "version": "1.0.0",
+  "icon": "🛠️",
+  "status": "active",
+  "category": "utility",
+  "tags": ["icon", "generator", "utility"]
+}
