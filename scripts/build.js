@@ -2,10 +2,13 @@ const fs = require('fs');
 const path = require('path');
 
 class ToolHubBuilder {
-    constructor() {
-        this.toolsDir = path.join(__dirname, '..', 'tools');
-        this.outputDir = path.join(__dirname, '..', 'dist');
+    constructor(rootDir = process.cwd()) {
+        this.rootDir = rootDir;
+        this.toolsDir = path.join(this.rootDir, 'tools');
+        this.outputDir = path.join(this.rootDir, 'dist');
         this.tools = [];
+        this.categories = new Set();
+        this.tags = new Set();
     }
 
     // Scan the tools directory for available tools
@@ -13,61 +16,115 @@ class ToolHubBuilder {
         console.log('🔍 Scanning for tools...');
         
         if (!fs.existsSync(this.toolsDir)) {
-            console.log('⚠️  Tools directory not found, creating it...');
+            console.log('📁 Creating tools directory...');
             fs.mkdirSync(this.toolsDir, { recursive: true });
-            this.createExampleTool();
+            this.generateToolTemplate();
+            console.log('📋 Created tool template and documentation');
         }
 
         const toolDirs = fs.readdirSync(this.toolsDir, { withFileTypes: true })
             .filter(dirent => dirent.isDirectory())
             .map(dirent => dirent.name);
 
+        this.tools = []; // Reset tools array
+        this.categories.clear();
+        this.tags.clear();
+
         for (const toolDir of toolDirs) {
+            if (toolDir.startsWith('.') || toolDir === 'template') {
+                continue; // Skip hidden directories and template
+            }
+
             const toolPath = path.join(this.toolsDir, toolDir);
             const configPath = path.join(toolPath, 'config.json');
-            const indexPath = path.join(toolPath, 'index.html');
 
-            // Check if tool has required files
-            if (fs.existsSync(configPath) && fs.existsSync(indexPath)) {
+            if (fs.existsSync(configPath)) {
                 try {
                     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
                     const tool = {
                         id: toolDir,
                         path: `/tools/${toolDir}`,
-                        indexPath: indexPath,
+                        indexPath: path.join(toolPath, 'index.html'),
+                        configPath: configPath,
+                        hasIndex: fs.existsSync(path.join(toolPath, 'index.html')),
+                        lastModified: fs.statSync(configPath).mtime,
                         ...config
                     };
                     
-                    // Validate required fields
                     if (this.validateTool(tool)) {
                         this.tools.push(tool);
-                        console.log(`✅ Found tool: ${tool.name}`);
+                        
+                        // Collect categories and tags for analytics
+                        if (tool.category) this.categories.add(tool.category);
+                        if (tool.tags) tool.tags.forEach(tag => this.tags.add(tag));
+                        
+                        console.log(`✅ ${tool.name} (${tool.status}) ${!tool.hasIndex ? '[no HTML]' : ''}`);
                     } else {
-                        console.log(`❌ Invalid tool config: ${toolDir}`);
+                        console.log(`❌ Invalid config: ${toolDir}`);
                     }
                 } catch (error) {
-                    console.log(`❌ Error reading config for ${toolDir}:`, error.message);
+                    console.log(`❌ JSON error in ${toolDir}: ${error.message}`);
                 }
             } else {
-                console.log(`⚠️  Skipping ${toolDir}: missing config.json or index.html`);
+                console.log(`⚠️  Skipping ${toolDir}: no config.json`);
             }
         }
 
-        console.log(`📊 Found ${this.tools.length} valid tools`);
+        console.log(`\n📊 Discovery Summary:`);
+        console.log(`   Tools found: ${this.tools.length}`);
+        console.log(`   Categories: ${Array.from(this.categories).join(', ') || 'none'}`);
+        console.log(`   Unique tags: ${this.tags.size}`);
+        
         return this.tools;
     }
 
     // Validate tool configuration
     validateTool(tool) {
         const required = ['name', 'description', 'icon', 'status'];
-        return required.every(field => tool[field] !== undefined);
+        const missing = required.filter(field => !tool[field]);
+        
+        if (missing.length > 0) {
+            console.log(`   ❌ Missing: ${missing.join(', ')}`);
+            return false;
+        }
+        
+        // Validate status
+        const validStatuses = ['active', 'beta', 'coming-soon', 'deprecated', 'maintenance'];
+        if (!validStatuses.includes(tool.status)) {
+            console.log(`   ❌ Invalid status: ${tool.status}`);
+            return false;
+        }
+        
+        // Validate required string fields
+        if (typeof tool.name !== 'string' || tool.name.length < 2) {
+            console.log(`   ❌ Invalid name: must be string with 2+ characters`);
+            return false;
+        }
+        
+        if (typeof tool.description !== 'string' || tool.description.length < 10) {
+            console.log(`   ❌ Invalid description: must be string with 10+ characters`);
+            return false;
+        }
+        
+        return true;
     }
 
-    // Generate the tools manifest
+    // Generate comprehensive manifest
     generateManifest() {
+        const activeTools = this.tools.filter(t => t.status === 'active');
+        const betaTools = this.tools.filter(t => t.status === 'beta');
+        
         const manifest = {
             version: '1.0.0',
             generated: new Date().toISOString(),
+            buildId: this.generateBuildId(),
+            summary: {
+                total: this.tools.length,
+                active: activeTools.length,
+                beta: betaTools.length,
+                categories: Array.from(this.categories).sort(),
+                tags: Array.from(this.tags).sort()
+            },
             tools: this.tools.map(tool => ({
                 id: tool.id,
                 name: tool.name,
@@ -76,59 +133,64 @@ class ToolHubBuilder {
                 status: tool.status,
                 path: tool.path,
                 category: tool.category || 'utility',
-                tags: tool.tags || []
+                tags: tool.tags || [],
+                hasIndex: tool.hasIndex,
+                lastModified: tool.lastModified?.toISOString(),
+                // Optional fields
+                ...(tool.author && { author: tool.author }),
+                ...(tool.version && { version: tool.version }),
+                ...(tool.repository && { repository: tool.repository }),
+                ...(tool.license && { license: tool.license })
             }))
         };
 
         return manifest;
     }
 
-    // Build the main index.html with dynamic tool loading
-    async buildIndex() {
-        console.log('🏗️  Building main index.html...');
-        
-        const indexTemplate = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-        const manifest = this.generateManifest();
-
-        // Inject tools data into the HTML
-        const toolsData = `
-        <script>
-        // Auto-generated tools data
-        window.TOOLS_MANIFEST = ${JSON.stringify(manifest, null, 2)};
-        </script>`;
-
-        // Insert before closing head tag
-        const updatedIndex = indexTemplate.replace('</head>', `${toolsData}\n</head>`);
-
-        // Ensure output directory exists
-        if (!fs.existsSync(this.outputDir)) {
-            fs.mkdirSync(this.outputDir, { recursive: true });
-        }
-
-        // Write the updated index.html
-        fs.writeFileSync(path.join(this.outputDir, 'index.html'), updatedIndex);
-        console.log('✅ Built index.html');
+    // Generate unique build ID
+    generateBuildId() {
+        const timestamp = Date.now();
+        const hash = require('crypto')
+            .createHash('md5')
+            .update(this.tools.map(t => `${t.id}-${t.lastModified}`).join(''))
+            .digest('hex')
+            .substring(0, 8);
+        return `${timestamp}-${hash}`;
     }
 
-    // Copy tools to output directory
+    // Copy tools to output directory with error handling
     async copyTools() {
-        console.log('📁 Copying tools...');
+        console.log('\n📁 Copying tools to output...');
         
         const toolsOutput = path.join(this.outputDir, 'tools');
-        if (!fs.existsSync(toolsOutput)) {
-            fs.mkdirSync(toolsOutput, { recursive: true });
+        
+        // Clean and recreate output directory
+        if (fs.existsSync(toolsOutput)) {
+            fs.rmSync(toolsOutput, { recursive: true, force: true });
         }
+        fs.mkdirSync(toolsOutput, { recursive: true });
+
+        let copiedCount = 0;
+        let skippedCount = 0;
 
         for (const tool of this.tools) {
             const sourcePath = path.join(this.toolsDir, tool.id);
             const destPath = path.join(toolsOutput, tool.id);
             
-            this.copyDirectorySync(sourcePath, destPath);
-            console.log(`📋 Copied ${tool.name}`);
+            try {
+                this.copyDirectorySync(sourcePath, destPath);
+                console.log(`📋 ${tool.name}`);
+                copiedCount++;
+            } catch (error) {
+                console.log(`⚠️  Skipped ${tool.name}: ${error.message}`);
+                skippedCount++;
+            }
         }
+        
+        console.log(`\n📁 Copy Summary: ${copiedCount} copied, ${skippedCount} skipped`);
     }
 
-    // Utility function to copy directories recursively
+    // Utility: Copy directory recursively with filtering
     copyDirectorySync(src, dest) {
         if (!fs.existsSync(dest)) {
             fs.mkdirSync(dest, { recursive: true });
@@ -137,6 +199,11 @@ class ToolHubBuilder {
         const files = fs.readdirSync(src);
         
         for (const file of files) {
+            // Skip hidden files and common dev files
+            if (file.startsWith('.') || ['node_modules', 'package-lock.json'].includes(file)) {
+                continue;
+            }
+
             const srcPath = path.join(src, file);
             const destPath = path.join(dest, file);
             const stat = fs.statSync(srcPath);
@@ -149,336 +216,282 @@ class ToolHubBuilder {
         }
     }
 
-    // Create an example tool for demonstration
-    createExampleTool() {
-        const exampleToolDir = path.join(this.toolsDir, 'example-calculator');
-        
-        if (!fs.existsSync(exampleToolDir)) {
-            fs.mkdirSync(exampleToolDir, { recursive: true });
+    // Generate tool template and documentation
+    generateToolTemplate() {
+        const templateDir = path.join(this.toolsDir, 'template');
+        fs.mkdirSync(templateDir, { recursive: true });
 
-            // Create config.json
-            const config = {
-                name: "Simple Calculator",
-                description: "A basic calculator for quick mathematical operations.",
-                icon: "🧮",
-                status: "active",
-                category: "utility",
-                tags: ["math", "calculator", "utility"]
-            };
+        // Template config.json
+        const templateConfig = {
+            name: "My Tool Name",
+            description: "A brief description of what this tool does (minimum 10 characters)",
+            icon: "🛠️",
+            status: "active",
+            category: "utility",
+            tags: ["example", "template"],
+            author: "Your Name",
+            version: "1.0.0",
+            repository: "https://github.com/username/repo",
+            license: "MIT"
+        };
 
-            fs.writeFileSync(
-                path.join(exampleToolDir, 'config.json'),
-                JSON.stringify(config, null, 2)
-            );
+        fs.writeFileSync(
+            path.join(templateDir, 'config.json'),
+            JSON.stringify(templateConfig, null, 2)
+        );
 
-            // Create index.html
-            const html = `<!DOCTYPE html>
+        // Template HTML
+        const templateHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Calculator</title>
+    <title>My Tool Name</title>
     <style>
         body {
-            font-family: 'Inter', sans-serif;
-            max-width: 400px;
-            margin: 2rem auto;
+            font-family: system-ui, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
             padding: 2rem;
-            background: #f8fafc;
+            line-height: 1.6;
         }
-        .calculator {
+        .container {
             background: white;
-            border-radius: 12px;
-            padding: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        .display {
-            width: 100%;
-            height: 60px;
-            font-size: 2rem;
-            text-align: right;
-            padding: 0 1rem;
-            border: 2px solid #e2e8f0;
             border-radius: 8px;
-            margin-bottom: 1rem;
-            background: #f8fafc;
-        }
-        .buttons {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 0.5rem;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
         button {
-            height: 60px;
+            background: #007bff;
+            color: white;
             border: none;
-            border-radius: 8px;
-            font-size: 1.2rem;
-            font-weight: 500;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
             cursor: pointer;
-            transition: all 0.2s;
         }
-        .number, .operator {
-            background: #f1f5f9;
-            color: #334155;
+        button:hover {
+            background: #0056b3;
         }
-        .number:hover, .operator:hover {
-            background: #e2e8f0;
-        }
-        .equals {
-            background: #6366f1;
-            color: white;
-        }
-        .equals:hover {
-            background: #4f46e5;
-        }
-        .clear {
-            background: #ef4444;
-            color: white;
-        }
-        .clear:hover {
-            background: #dc2626;
+        input, textarea {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 0.5rem 0;
         }
     </style>
 </head>
 <body>
-    <div class="calculator">
-        <h2>🧮 Simple Calculator</h2>
-        <input type="text" class="display" id="display" readonly>
-        <div class="buttons">
-            <button class="clear" onclick="clearDisplay()">C</button>
-            <button class="operator" onclick="appendToDisplay('/')">/</button>
-            <button class="operator" onclick="appendToDisplay('*')">×</button>
-            <button class="operator" onclick="deleteLast()">⌫</button>
-            <button class="number" onclick="appendToDisplay('7')">7</button>
-            <button class="number" onclick="appendToDisplay('8')">8</button>
-            <button class="number" onclick="appendToDisplay('9')">9</button>
-            <button class="operator" onclick="appendToDisplay('-')">-</button>
-            <button class="number" onclick="appendToDisplay('4')">4</button>
-            <button class="number" onclick="appendToDisplay('5')">5</button>
-            <button class="number" onclick="appendToDisplay('6')">6</button>
-            <button class="operator" onclick="appendToDisplay('+')">+</button>
-            <button class="number" onclick="appendToDisplay('1')">1</button>
-            <button class="number" onclick="appendToDisplay('2')">2</button>
-            <button class="number" onclick="appendToDisplay('3')">3</button>
-            <button class="equals" onclick="calculate()" rowspan="2">=</button>
-            <button class="number" onclick="appendToDisplay('0')" colspan="2">0</button>
-            <button class="number" onclick="appendToDisplay('.')">.</button>
+    <div class="container">
+        <h1>🛠️ My Tool Name</h1>
+        <p>Replace this template with your tool's functionality.</p>
+        
+        <div>
+            <label>Input:</label>
+            <input type="text" id="input" placeholder="Enter something...">
+            <button onclick="processInput()">Process</button>
+        </div>
+        
+        <div id="output" style="margin-top: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 4px;">
+            Output will appear here...
         </div>
     </div>
 
     <script>
-        let display = document.getElementById('display');
-        
-        function appendToDisplay(value) {
-            display.value += value;
+        function processInput() {
+            const input = document.getElementById('input').value;
+            const output = document.getElementById('output');
+            
+            // Replace with your tool's logic
+            output.textContent = input ? \`You entered: \${input}\` : 'Please enter something';
         }
-        
-        function clearDisplay() {
-            display.value = '';
-        }
-        
-        function deleteLast() {
-            display.value = display.value.slice(0, -1);
-        }
-        
-        function calculate() {
-            try {
-                // Replace × with * for calculation
-                let expression = display.value.replace(/×/g, '*');
-                let result = eval(expression);
-                display.value = result;
-            } catch (error) {
-                display.value = 'Error';
-                setTimeout(() => clearDisplay(), 1500);
-            }
-        }
-        
-        // Keyboard support
-        document.addEventListener('keydown', function(event) {
-            const key = event.key;
-            if ('0123456789+-*/.'.includes(key)) {
-                appendToDisplay(key === '*' ? '×' : key);
-            } else if (key === 'Enter' || key === '=') {
-                calculate();
-            } else if (key === 'Escape' || key === 'c' || key === 'C') {
-                clearDisplay();
-            } else if (key === 'Backspace') {
-                deleteLast();
-            }
-        });
     </script>
 </body>
 </html>`;
 
-            fs.writeFileSync(path.join(exampleToolDir, 'index.html'), html);
-            console.log('📝 Created example calculator tool');
-        }
-    }
+        fs.writeFileSync(path.join(templateDir, 'index.html'), templateHTML);
 
-    // Generate a README with instructions
-    generateReadme() {
-        const readme = `# Tool Hub
+        // README for developers
+        const readme = `# Tool Hub - Adding Your Tool
 
-A dynamic collection of web tools and utilities.
+## Quick Start
 
-## Adding New Tools
+1. Copy the \`template\` folder and rename it to your tool name
+2. Edit \`config.json\` with your tool details
+3. Replace \`index.html\` with your tool interface
+4. Run: \`node build.js build\`
 
-To add a new tool to the hub:
+## Config.json Reference
 
-1. Create a new directory in the \`tools/\` folder with your tool name (e.g., \`tools/my-awesome-tool/\`)
-
-2. Create a \`config.json\` file with the following structure:
 \`\`\`json
 {
-  "name": "My Awesome Tool",
-  "description": "A brief description of what your tool does",
-  "icon": "🚀",
-  "status": "active",
-  "category": "utility",
-  "tags": ["tag1", "tag2"]
+  "name": "Required: Display name (2+ chars)",
+  "description": "Required: Description (10+ chars)", 
+  "icon": "Required: Single emoji or symbol",
+  "status": "Required: active|beta|coming-soon|deprecated|maintenance",
+  "category": "Optional: utility|developer|design|productivity|converter",
+  "tags": ["Optional", "array", "of", "strings"],
+  "author": "Optional: Your name",
+  "version": "Optional: Semantic version",
+  "repository": "Optional: Git repository URL",
+  "license": "Optional: License type"
 }
 \`\`\`
 
-3. Create an \`index.html\` file with your tool's interface and functionality
+## Status Meanings
 
-4. Run the build script: \`npm run build\`
+- **active**: Fully functional and ready to use
+- **beta**: Working but may have bugs or missing features  
+- **coming-soon**: Placeholder for planned tool
+- **deprecated**: No longer maintained
+- **maintenance**: Temporarily unavailable
 
-## Configuration Options
-
-### Status Values
-- \`active\`: Tool is fully functional
-- \`beta\`: Tool is in beta testing
-- \`coming-soon\`: Tool is planned but not yet available
-
-### Categories
-- \`utility\`: General utilities
-- \`developer\`: Developer tools
-- \`design\`: Design and creative tools
-- \`productivity\`: Productivity tools
-- \`converter\`: File/data converters
-
-## Build Process
-
-The build script will:
-1. Scan the \`tools/\` directory for valid tools
-2. Generate a manifest with all available tools
-3. Build the main index.html with dynamic tool loading
-4. Copy all tools to the output directory
-
-## Directory Structure
+## File Structure
 
 \`\`\`
-tool-hub/
-├── index.html          # Main hub page
-├── tools/              # Individual tools
-│   ├── tool-name/
-│   │   ├── config.json # Tool metadata
-│   │   └── index.html  # Tool interface
-├── scripts/
-│   └── build.js        # Build automation
-└── dist/               # Built output
+tools/
+└── your-tool-name/
+    ├── config.json     (Required: Tool metadata)
+    ├── index.html      (Optional: Tool interface)
+    ├── style.css       (Optional: Custom styles)
+    ├── script.js       (Optional: Tool logic)
+    └── assets/         (Optional: Images, etc.)
 \`\`\`
 
-## Development
+## Build Commands
 
-1. Install dependencies: \`npm install\`
-2. Create your tools in the \`tools/\` directory
-3. Build the project: \`npm run build\`
-4. Serve the \`dist/\` directory
-
-Happy building! 🛠️
+\`\`\`bash
+node build.js scan    # Discover tools
+node build.js build   # Full build process  
+node build.js clean   # Clean output directory
+\`\`\`
 `;
 
-        fs.writeFileSync(path.join(__dirname, '..', 'README.md'), readme);
-        console.log('📚 Generated README.md');
+        fs.writeFileSync(path.join(this.toolsDir, 'README.md'), readme);
+    }
+
+    // Clean output directory
+    clean() {
+        console.log('🧹 Cleaning output directory...');
+        
+        if (fs.existsSync(this.outputDir)) {
+            fs.rmSync(this.outputDir, { recursive: true, force: true });
+            console.log('✅ Output directory cleaned');
+        } else {
+            console.log('ℹ️  Output directory already clean');
+        }
     }
 
     // Main build process
     async build() {
-        console.log('🚀 Starting Tool Hub build process...\n');
+        console.log('🚀 Tool Hub Build Process\n');
         
         try {
+            // Ensure output directory exists
+            if (!fs.existsSync(this.outputDir)) {
+                fs.mkdirSync(this.outputDir, { recursive: true });
+            }
+
             await this.scanTools();
-            await this.buildIndex();
             await this.copyTools();
-            this.generateReadme();
             
-            console.log('\n✅ Build completed successfully!');
-            console.log(`📊 Built ${this.tools.length} tools`);
-            console.log(`📁 Output directory: ${this.outputDir}`);
-            
-            // Generate manifest file for external use
+            // Generate manifest
             const manifest = this.generateManifest();
             fs.writeFileSync(
                 path.join(this.outputDir, 'manifest.json'),
                 JSON.stringify(manifest, null, 2)
             );
-            console.log('📋 Generated manifest.json');
+            
+            // Generate build info
+            const buildInfo = {
+                buildTime: new Date().toISOString(),
+                buildId: manifest.buildId,
+                toolsCount: this.tools.length,
+                categories: Array.from(this.categories),
+                outputDir: this.outputDir
+            };
+            
+            fs.writeFileSync(
+                path.join(this.outputDir, 'build-info.json'),
+                JSON.stringify(buildInfo, null, 2)
+            );
+            
+            console.log('\n✅ Build Complete!');
+            console.log(`📋 Manifest: ${this.tools.length} tools`);
+            console.log(`📁 Output: ${this.outputDir}`);
+            console.log(`🔖 Build ID: ${manifest.buildId}`);
             
         } catch (error) {
-            console.error('❌ Build failed:', error);
+            console.error('\n❌ Build Failed:', error.message);
             process.exit(1);
         }
     }
 
-    // Development server (basic)
-    serve(port = 3000) {
-        const http = require('http');
-        const url = require('url');
-        const mime = require('mime-types');
-
-        const server = http.createServer((req, res) => {
-            const parsedUrl = url.parse(req.url);
-            let pathname = parsedUrl.pathname;
-            
-            // Default to index.html
-            if (pathname === '/') {
-                pathname = '/index.html';
+    // Get build statistics
+    getStats() {
+        return {
+            tools: this.tools.length,
+            categories: Array.from(this.categories),
+            tags: Array.from(this.tags),
+            byStatus: {
+                active: this.tools.filter(t => t.status === 'active').length,
+                beta: this.tools.filter(t => t.status === 'beta').length,
+                'coming-soon': this.tools.filter(t => t.status === 'coming-soon').length,
+                deprecated: this.tools.filter(t => t.status === 'deprecated').length,
+                maintenance: this.tools.filter(t => t.status === 'maintenance').length
             }
-            
-            const filePath = path.join(this.outputDir, pathname);
-            
-            fs.readFile(filePath, (err, data) => {
-                if (err) {
-                    res.writeHead(404);
-                    res.end('File not found');
-                    return;
-                }
-                
-                const mimeType = mime.lookup(filePath) || 'text/html';
-                res.writeHead(200, { 'Content-Type': mimeType });
-                res.end(data);
-            });
-        });
-        
-        server.listen(port, () => {
-            console.log(`🌐 Development server running at http://localhost:${port}`);
-        });
+        };
     }
 }
 
-// CLI interface
+// CLI Interface
 if (require.main === module) {
     const builder = new ToolHubBuilder();
-    const command = process.argv[2];
+    const command = process.argv[2] || 'help';
     
     switch (command) {
+        case 'scan':
+            builder.scanTools().then(() => {
+                console.log('\n📊 Stats:', builder.getStats());
+            });
+            break;
+            
         case 'build':
             builder.build();
             break;
-        case 'serve':
-            const port = process.argv[3] || 3000;
-            builder.build().then(() => {
-                builder.serve(port);
+            
+        case 'clean':
+            builder.clean();
+            break;
+            
+        case 'stats':
+            builder.scanTools().then(() => {
+                console.log('📊 Tool Hub Statistics:');
+                const stats = builder.getStats();
+                console.log(JSON.stringify(stats, null, 2));
             });
             break;
-        case 'scan':
-            builder.scanTools().then(tools => {
-                console.log('Found tools:', tools.map(t => t.name));
-            });
-            break;
+            
+        case 'help':
         default:
-            console.log('Usage: node build.js [build|serve|scan]');
+            console.log(`
+🛠️  Tool Hub Builder
+
+Commands:
+  scan     Discover and validate tools
+  build    Full build process (scan + copy + manifest)
+  clean    Remove output directory
+  stats    Show detailed statistics
+  help     Show this help message
+
+Usage:
+  node build.js [command]
+
+Directory Structure:
+  tools/           Your tool submissions
+  dist/            Generated output
+  dist/manifest.json    Tool registry
+`);
             break;
     }
 }
