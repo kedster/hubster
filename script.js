@@ -1,230 +1,434 @@
 // Global variables
 let allTools = [];
 let filteredTools = [];
+let isLoading = false;
+let loadAttempted = false;
 
-// Initialize the app
-document.addEventListener('DOMContentLoaded', () => {
-    showHome();
-    loadTools();
-    setupSearch();
-});
-
-// Function to show the home view
-function showHome() {
-    document.getElementById('home-view').style.display = 'block';
-    document.getElementById('tool-view').style.display = 'none';
-    document.getElementById('about-view').style.display = 'none';
-}
-
-// Function to show the about view
-function showAbout() {
-    document.getElementById('home-view').style.display = 'none';
-    document.getElementById('tool-view').style.display = 'none';
-    document.getElementById('about-view').style.display = 'block';
-}
-
-// Function to scroll to tools section
-function scrollToTools() {
-    const toolsSection = document.getElementById('tools');
-    if (toolsSection) {
-        toolsSection.scrollIntoView({ behavior: 'smooth' });
-    }
-}
-
-// Function to dynamically discover and load tools
-async function loadTools() {
-    const loadingEl = document.getElementById('loading');
-    const errorEl = document.getElementById('error');
-    
-    loadingEl.style.display = 'block';
-    errorEl.style.display = 'none';
-    allTools = [];
-    
-    try {
-        // Get list of potential tool directories
-        const toolDirs = await discoverToolDirectories();
-        
-        if (toolDirs.length === 0) {
-            throw new Error('No tool directories found');
-        }
-        
-        // Load each tool's configuration
-        for (const dir of toolDirs) {
-            try {
-                const config = await loadToolConfig(dir);
-                if (config && validateToolConfig(config)) {
-                    const tool = {
-                        id: dir,
-                        path: `tools/${dir}`,
-                        ...config
-                    };
-                    allTools.push(tool);
-                    console.log(`✅ Loaded: ${tool.name}`);
-                }
-            } catch (err) {
-                console.warn(`❌ Failed to load tool ${dir}:`, err.message);
-            }
-        }
-        
-        if (allTools.length === 0) {
-            throw new Error('No valid tools found');
-        }
-        
-        filteredTools = [...allTools];
-        renderTools();
-        loadingEl.style.display = 'none';
-        
-        console.log(`🎉 Successfully loaded ${allTools.length} tools`);
-        
-    } catch (error) {
-        console.error('Error loading tools:', error);
-        loadingEl.style.display = 'none';
-        errorEl.style.display = 'block';
-        
-        // Show add tool card even when no tools are found
-        renderTools();
-    }
-}
-
-// Function to discover tool directories by attempting to load common paths
-async function discoverToolDirectories() {
-    const commonToolNames = [
+// Configuration
+const CONFIG = {
+    TOOL_DISCOVERY_TIMEOUT: 5000,
+    MAX_RETRY_ATTEMPTS: 3,
+    RETRY_DELAY: 1000,
+    IFRAME_SANDBOX: 'allow-scripts allow-same-origin allow-forms',
+    COMMON_TOOL_PATTERNS: [
         'calculator', 'text-editor', 'color-picker', 'json-formatter', 
         'base64-encoder', 'url-encoder', 'password-generator', 'qr-generator',
         'markdown-preview', 'css-minifier', 'js-beautifier', 'image-resizer',
         'unit-converter', 'timestamp-converter', 'hash-generator', 'lorem-ipsum',
         'gradient-generator', 'regex-tester', 'ascii-art', 'word-counter'
-    ];
+    ]
+};
+
+// Initialize the app with error boundary
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        initializeApp();
+    } catch (error) {
+        console.error('Failed to initialize app:', error);
+        showGlobalError('Application failed to initialize. Please refresh the page.');
+    }
+});
+
+// Main initialization function
+async function initializeApp() {
+    showHome();
+    await loadTools();
+    setupSearch();
+    setupEventListeners();
+}
+
+// Setup additional event listeners
+function setupEventListeners() {
+    // Handle browser back/forward
+    window.addEventListener('popstate', handlePopState);
     
-    const discoveredDirs = [];
+    // Handle visibility change for potential refresh
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     
-    // Try to discover existing tool directories
-    for (const toolName of commonToolNames) {
+    // Global error handler
+    window.addEventListener('error', handleGlobalError);
+}
+
+// Navigation functions with URL state management
+function showHome() {
+    hideAllViews();
+    const homeView = document.getElementById('home-view');
+    if (homeView) {
+        homeView.style.display = 'block';
+        updateURL('');
+    }
+}
+
+function showAbout() {
+    hideAllViews();
+    const aboutView = document.getElementById('about-view');
+    if (aboutView) {
+        aboutView.style.display = 'block';
+        updateURL('about');
+    }
+}
+
+function hideAllViews() {
+    const views = ['home-view', 'tool-view', 'about-view'];
+    views.forEach(viewId => {
+        const view = document.getElementById(viewId);
+        if (view) view.style.display = 'none';
+    });
+}
+
+// URL management
+function updateURL(path) {
+    const newURL = path ? `#${path}` : location.pathname;
+    history.pushState({ path }, '', newURL);
+}
+
+function handlePopState(event) {
+    const path = event.state?.path || location.hash.slice(1);
+    if (path === 'about') {
+        showAbout();
+    } else if (path.startsWith('tool/')) {
+        const toolId = path.split('/')[1];
+        const tool = allTools.find(t => t.id === toolId);
+        if (tool) openTool(tool);
+    } else {
+        showHome();
+    }
+}
+
+// Enhanced scroll function with error handling
+function scrollToTools() {
+    try {
+        const toolsSection = document.getElementById('tools');
+        if (toolsSection) {
+            toolsSection.scrollIntoView({ 
+                behavior: 'smooth',
+                block: 'start'
+            });
+        }
+    } catch (error) {
+        console.warn('Scroll to tools failed:', error);
+    }
+}
+
+// Enhanced tool loading with proper error handling and retry logic
+async function loadTools() {
+    if (isLoading) return;
+    
+    isLoading = true;
+    const loadingEl = document.getElementById('loading');
+    const errorEl = document.getElementById('error');
+    
+    // Show loading state
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (errorEl) errorEl.style.display = 'none';
+    
+    allTools = [];
+    let retryCount = 0;
+    
+    while (retryCount < CONFIG.MAX_RETRY_ATTEMPTS) {
         try {
-            const response = await fetch(`tools/${toolName}/config.json`);
-            if (response.ok) {
-                discoveredDirs.push(toolName);
+            await loadToolsWithTimeout();
+            break;
+        } catch (error) {
+            retryCount++;
+            console.warn(`Tool loading attempt ${retryCount} failed:`, error.message);
+            
+            if (retryCount < CONFIG.MAX_RETRY_ATTEMPTS) {
+                await delay(CONFIG.RETRY_DELAY * retryCount);
+            } else {
+                handleLoadingError(error);
+            }
+        }
+    }
+    
+    // Finalize loading state
+    filteredTools = [...allTools];
+    renderTools();
+    if (loadingEl) loadingEl.style.display = 'none';
+    isLoading = false;
+    loadAttempted = true;
+    
+    console.log(`🎉 Successfully loaded ${allTools.length} tools`);
+}
+
+// Tool loading with timeout
+async function loadToolsWithTimeout() {
+    return Promise.race([
+        loadToolsCore(),
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Tool discovery timeout')), CONFIG.TOOL_DISCOVERY_TIMEOUT)
+        )
+    ]);
+}
+
+// Core tool loading logic
+async function loadToolsCore() {
+    // Try to load from manifest first (build process)
+    try {
+        const manifestTools = await loadFromManifest();
+        if (manifestTools.length > 0) {
+            allTools = manifestTools;
+            return;
+        }
+    } catch (error) {
+        console.info('No manifest found, falling back to dynamic discovery');
+    }
+    
+    // Fallback to dynamic discovery
+    const toolDirs = await discoverToolDirectories();
+    
+    if (toolDirs.length === 0) {
+        console.info('No tool directories found');
+        return;
+    }
+    
+    // Load each tool's configuration with parallel processing
+    const toolPromises = toolDirs.map(async (dir) => {
+        try {
+            const config = await loadToolConfig(dir);
+            if (config && validateToolConfig(config)) {
+                return {
+                    id: dir,
+                    path: `tools/${dir}`,
+                    ...config
+                };
             }
         } catch (err) {
-            // Silently continue - this is expected for non-existent tools
+            console.warn(`Failed to load tool ${dir}:`, err.message);
         }
-    }
+        return null;
+    });
     
-    // Also try to scan for any other directories if possible
-    try {
-        // This approach works by attempting to load a directory listing
-        // Not all servers support this, but some do
-        const response = await fetch('tools/');
-        if (response.ok) {
-            const html = await response.text();
-            const dirMatches = html.match(/href="([^"]+)\/"/g);
-            if (dirMatches) {
-                const additionalDirs = dirMatches
-                    .map(match => match.replace(/href="|\/"/g, ''))
-                    .filter(dir => !dir.includes('.') && !discoveredDirs.includes(dir));
-                discoveredDirs.push(...additionalDirs);
-            }
-        }
-    } catch (err) {
-        // Directory listing not supported, continue with discovered tools
-    }
-    
-    return [...new Set(discoveredDirs)]; // Remove duplicates
+    const toolResults = await Promise.all(toolPromises);
+    allTools = toolResults.filter(tool => tool !== null);
 }
 
-// Function to load tool configuration
-async function loadToolConfig(toolDir) {
+// Load tools from build manifest
+async function loadFromManifest() {
+    const response = await fetch('dist/manifest.json');
+    if (!response.ok) throw new Error('Manifest not found');
+    
+    const manifest = await response.json();
+    return manifest.tools || [];
+}
+
+// Enhanced tool directory discovery
+async function discoverToolDirectories() {
+    const discoveredDirs = new Set();
+    
+    // Try directory listing first
     try {
-        const response = await fetch(`tools/${toolDir}/config.json`);
-        if (!response.ok) {
-            throw new Error(`Config not found: ${response.status}`);
-        }
-        return await response.json();
+        const dirs = await discoverFromListing();
+        dirs.forEach(dir => discoveredDirs.add(dir));
     } catch (error) {
-        throw new Error(`Failed to load config: ${error.message}`);
+        console.info('Directory listing not available, using pattern discovery');
+    }
+    
+    // Fallback to pattern-based discovery
+    const patternDirs = await discoverFromPatterns();
+    patternDirs.forEach(dir => discoveredDirs.add(dir));
+    
+    return Array.from(discoveredDirs);
+}
+
+// Discover tools from directory listing
+async function discoverFromListing() {
+    const response = await fetch('tools/');
+    if (!response.ok) throw new Error('Directory listing unavailable');
+    
+    const html = await response.text();
+    const dirMatches = html.match(/href="([^"\/]+)\/"/g);
+    
+    if (!dirMatches) return [];
+    
+    return dirMatches
+        .map(match => match.replace(/href="|\/"/g, ''))
+        .filter(dir => !dir.includes('.') && dir !== 'template');
+}
+
+// Discover tools using common patterns
+async function discoverFromPatterns() {
+    const discoveredDirs = [];
+    
+    // Use parallel requests with proper error handling
+    const checkPromises = CONFIG.COMMON_TOOL_PATTERNS.map(async (toolName) => {
+        try {
+            const response = await fetch(`tools/${toolName}/config.json`, { 
+                method: 'HEAD' 
+            });
+            if (response.ok) {
+                return toolName;
+            }
+        } catch (error) {
+            // Expected for non-existent tools
+        }
+        return null;
+    });
+    
+    const results = await Promise.allSettled(checkPromises);
+    results.forEach(result => {
+        if (result.status === 'fulfilled' && result.value) {
+            discoveredDirs.push(result.value);
+        }
+    });
+    
+    return discoveredDirs;
+}
+
+// Enhanced tool configuration loading
+async function loadToolConfig(toolDir) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    
+    try {
+        const response = await fetch(`tools/${toolDir}/config.json`, {
+            signal: controller.signal,
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const text = await response.text();
+        return JSON.parse(text);
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+            throw new Error('Configuration load timeout');
+        }
+        throw error;
     }
 }
 
-// Function to validate tool configuration
+// Enhanced tool configuration validation
 function validateToolConfig(config) {
     const required = ['name', 'description', 'icon'];
-    const missing = required.filter(field => !config[field]);
+    const missing = required.filter(field => !config[field] || typeof config[field] !== 'string');
     
     if (missing.length > 0) {
-        console.warn(`Invalid config - missing: ${missing.join(', ')}`);
+        console.warn(`Invalid config - missing or invalid: ${missing.join(', ')}`);
         return false;
     }
     
-    // Set defaults
+    // Validate field lengths
+    if (config.name.trim().length < 2) {
+        console.warn('Invalid config - name too short');
+        return false;
+    }
+    
+    if (config.description.trim().length < 10) {
+        console.warn('Invalid config - description too short');
+        return false;
+    }
+    
+    // Validate status
+    const validStatuses = ['active', 'beta', 'coming-soon', 'deprecated', 'maintenance'];
+    if (config.status && !validStatuses.includes(config.status)) {
+        console.warn(`Invalid config - invalid status: ${config.status}`);
+        return false;
+    }
+    
+    // Set defaults for optional fields
     config.status = config.status || 'active';
     config.category = config.category || 'utility';
-    config.tags = config.tags || [];
+    config.tags = Array.isArray(config.tags) ? config.tags : [];
     
     return true;
 }
 
-// Function to render tools in the grid
+// Enhanced tool rendering with better error handling
 function renderTools() {
     const toolsGrid = document.getElementById('toolsGrid');
     const noToolsEl = document.getElementById('no-tools');
     
-    if (!toolsGrid) return;
+    if (!toolsGrid) {
+        console.error('Tools grid element not found');
+        return;
+    }
     
-    // Clear existing content
-    toolsGrid.innerHTML = '';
+    // Clear existing content safely
+    try {
+        toolsGrid.innerHTML = '';
+    } catch (error) {
+        console.error('Failed to clear tools grid:', error);
+        return;
+    }
     
-    if (filteredTools.length === 0 && allTools.length === 0) {
-        // Show add tool card when no tools exist
+    // Handle empty states
+    if (filteredTools.length === 0 && allTools.length === 0 && loadAttempted) {
         const addToolCard = createAddToolCard();
         toolsGrid.appendChild(addToolCard);
-        noToolsEl.style.display = 'none';
+        if (noToolsEl) noToolsEl.style.display = 'none';
         return;
     }
     
     if (filteredTools.length === 0) {
-        noToolsEl.style.display = 'block';
+        if (noToolsEl) noToolsEl.style.display = 'block';
         return;
     } else {
-        noToolsEl.style.display = 'none';
+        if (noToolsEl) noToolsEl.style.display = 'none';
     }
     
-    // Render each tool
+    // Render tools with error boundary for each card
     filteredTools.forEach(tool => {
-        const toolCard = createToolCard(tool);
-        toolsGrid.appendChild(toolCard);
+        try {
+            const toolCard = createToolCard(tool);
+            toolsGrid.appendChild(toolCard);
+        } catch (error) {
+            console.error(`Failed to render tool card for ${tool.name}:`, error);
+        }
     });
     
     // Add "Add New Tool" card
-    const addToolCard = createAddToolCard();
-    toolsGrid.appendChild(addToolCard);
+    try {
+        const addToolCard = createAddToolCard();
+        toolsGrid.appendChild(addToolCard);
+    } catch (error) {
+        console.error('Failed to create add tool card:', error);
+    }
 }
 
-// Function to create a tool card element
+// Enhanced tool card creation with security considerations
 function createToolCard(tool) {
     const card = document.createElement('div');
     card.className = 'tool-card';
-    card.onclick = () => openTool(tool);
+    
+    // Sanitize inputs
+    const safeName = escapeHtml(tool.name);
+    const safeDescription = escapeHtml(tool.description);
+    const safeIcon = escapeHtml(tool.icon);
+    const safeStatus = escapeHtml(tool.status);
     
     const statusClass = `status-${tool.status.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
     
     card.innerHTML = `
-        <div class="tool-status ${statusClass}">${tool.status}</div>
-        <div class="tool-icon">${tool.icon}</div>
-        <h3>${tool.name}</h3>
-        <p>${tool.description}</p>
-        <div class="tool-link" onclick="event.stopPropagation(); openTool(arguments[0])">
+        <div class="tool-status ${statusClass}">${safeStatus}</div>
+        <div class="tool-icon">${safeIcon}</div>
+        <h3>${safeName}</h3>
+        <p>${safeDescription}</p>
+        <div class="tool-link">
             Try it now →
         </div>
     `;
     
+    // Add click handler with proper event delegation
+    card.addEventListener('click', (event) => {
+        event.preventDefault();
+        openTool(tool);
+    });
+    
     return card;
 }
 
-// Function to create the "Add New Tool" card
+// Enhanced add tool card
 function createAddToolCard() {
     const card = document.createElement('div');
     card.className = 'tool-card add-tool-card';
-    card.onclick = showAddToolInstructions;
     
     card.innerHTML = `
         <div class="add-icon">➕</div>
@@ -235,76 +439,122 @@ function createAddToolCard() {
         </div>
     `;
     
+    card.addEventListener('click', (event) => {
+        event.preventDefault();
+        showAddToolInstructions();
+    });
+    
     return card;
 }
 
-// Function to open a tool
+// Enhanced tool opening with better security and error handling
 async function openTool(tool) {
+    const toolView = document.getElementById('tool-view');
+    const toolTitle = document.getElementById('tool-title');
+    const toolContent = document.getElementById('tool-content');
+    
+    if (!toolView || !toolTitle || !toolContent) {
+        console.error('Tool view elements not found');
+        return;
+    }
+    
+    // Update URL state
+    updateURL(`tool/${tool.id}`);
+    
+    // Update tool view safely
+    try {
+        toolTitle.textContent = tool.name;
+    } catch (error) {
+        console.error('Failed to set tool title:', error);
+    }
+    
+    // Show loading state
+    toolContent.innerHTML = `
+        <div class="tool-loading">
+            <div class="loading-spinner"></div>
+            <p>Loading ${escapeHtml(tool.name)}...</p>
+        </div>
+    `;
+    
+    // Show tool view
+    hideAllViews();
+    toolView.style.display = 'block';
+    
+    try {
+        await loadToolContent(tool, toolContent);
+    } catch (error) {
+        console.error(`Failed to load tool ${tool.name}:`, error);
+        showToolError(tool, toolContent, error);
+    }
+}
+
+// Load tool content with enhanced security
+async function loadToolContent(tool, toolContent) {
+    const toolPath = tool.path || `tools/${tool.id}`;
+    const indexUrl = `${toolPath}/index.html`;
+    
+    // Check if tool content exists
+    const response = await fetch(indexUrl, { method: 'HEAD' });
+    if (!response.ok) {
+        throw new Error('Tool content not available');
+    }
+    
+    // Create secure iframe
+    const iframe = document.createElement('iframe');
+    iframe.src = indexUrl;
+    iframe.title = tool.name;
+    iframe.sandbox = CONFIG.IFRAME_SANDBOX;
+    iframe.style.cssText = 'width: 100%; height: 600px; border: none; border-radius: 8px;';
+    
+    // Handle iframe load events
+    iframe.onload = () => {
+        console.log(`Tool ${tool.name} loaded successfully`);
+    };
+    
+    iframe.onerror = () => {
+        throw new Error('Failed to load tool content');
+    };
+    
+    toolContent.innerHTML = '';
+    toolContent.appendChild(iframe);
+}
+
+// Show tool error state
+function showToolError(tool, toolContent, error) {
+    const safeToolName = escapeHtml(tool.name);
+    const safeDescription = escapeHtml(tool.description);
+    const safeIcon = escapeHtml(tool.icon);
+    const toolPath = tool.path || `tools/${tool.id}`;
+    
+    toolContent.innerHTML = `
+        <div class="tool-error">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">${safeIcon}</div>
+            <h3>${safeToolName}</h3>
+            <p style="color: var(--text-secondary); margin: 1rem 0;">
+                ${safeDescription}
+            </p>
+            <div class="error-message">
+                <p>⚠️ Tool content could not be loaded</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">
+                    Make sure <code>${escapeHtml(toolPath)}/index.html</code> exists and is accessible
+                </p>
+                <button onclick="location.reload()" style="margin-top: 1rem;">
+                    🔄 Retry
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Enhanced add tool instructions
+function showAddToolInstructions() {
     const toolView = document.getElementById('tool-view');
     const toolTitle = document.getElementById('tool-title');
     const toolContent = document.getElementById('tool-content');
     
     if (!toolView || !toolTitle || !toolContent) return;
     
-    // Update tool view
-    toolTitle.textContent = tool.name;
-    
-    // Show loading state
-    toolContent.innerHTML = `
-        <div class="tool-loading">
-            <div class="loading-spinner"></div>
-            <p>Loading ${tool.name}...</p>
-        </div>
-    `;
-    
-    // Show tool view
-    document.getElementById('home-view').style.display = 'none';
-    document.getElementById('about-view').style.display = 'none';
-    toolView.style.display = 'block';
-    
-    try {
-        // Try to load the tool's HTML content
-        const response = await fetch(`${tool.path}/index.html`);
-        if (response.ok) {
-            const html = await response.text();
-            
-            // Create iframe to safely load the tool
-            toolContent.innerHTML = `
-                <iframe 
-                    src="${tool.path}/index.html" 
-                    style="width: 100%; height: 600px; border: none; border-radius: 8px;"
-                    title="${tool.name}"
-                ></iframe>
-            `;
-        } else {
-            throw new Error('Tool content not available');
-        }
-    } catch (error) {
-        // Show error state
-        toolContent.innerHTML = `
-            <div class="tool-error">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">${tool.icon}</div>
-                <h3>${tool.name}</h3>
-                <p style="color: var(--text-secondary); margin: 1rem 0;">
-                    ${tool.description}
-                </p>
-                <div class="error-message">
-                    <p>⚠️ Tool content could not be loaded</p>
-                    <p style="font-size: 0.9rem; color: var(--text-secondary);">
-                        Make sure <code>${tool.path}/index.html</code> exists
-                    </p>
-                </div>
-            </div>
-        `;
-    }
-}
-
-// Function to show add tool instructions
-function showAddToolInstructions() {
-    const toolView = document.getElementById('tool-view');
-    const toolTitle = document.getElementById('tool-title');
-    const toolContent = document.getElementById('tool-content');
-    
+    updateURL('add-tool');
     toolTitle.textContent = 'Add New Tool';
     toolContent.innerHTML = `
         <div class="add-tool-guide">
@@ -326,7 +576,7 @@ function showAddToolInstructions() {
                     <p>Create <code>config.json</code> with your tool metadata:</p>
                     <pre><code>{
   "name": "My Awesome Tool",
-  "description": "What your tool does",
+  "description": "What your tool does (minimum 10 characters)",
   "icon": "🔧",
   "status": "active",
   "category": "utility",
@@ -356,7 +606,7 @@ function showAddToolInstructions() {
             <div class="success-note">
                 <h4>✨ That's it!</h4>
                 <p>Your tool will automatically appear in the hub. No build process required!</p>
-                <button onclick="location.reload()" class="refresh-btn">
+                <button onclick="refreshTools()" class="refresh-btn">
                     🔄 Refresh to Discover New Tools
                 </button>
             </div>
@@ -364,21 +614,31 @@ function showAddToolInstructions() {
     `;
     
     // Show tool view
-    document.getElementById('home-view').style.display = 'none';
-    document.getElementById('about-view').style.display = 'none';
+    hideAllViews();
     toolView.style.display = 'block';
 }
 
-// Function to setup search functionality
+// Enhanced search setup with debouncing
 function setupSearch() {
     const searchInput = document.getElementById('searchInput');
     if (!searchInput) return;
     
-    searchInput.addEventListener('input', handleSearch);
-    searchInput.addEventListener('keyup', handleSearch);
+    let searchTimeout;
+    const handleSearchDebounced = (event) => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => handleSearch(event), 300);
+    };
+    
+    searchInput.addEventListener('input', handleSearchDebounced);
+    searchInput.addEventListener('keyup', (event) => {
+        if (event.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            handleSearch(event);
+        }
+    });
 }
 
-// Function to handle search input
+// Enhanced search handling
 function handleSearch(event) {
     const query = event.target.value.toLowerCase().trim();
     
@@ -387,10 +647,10 @@ function handleSearch(event) {
     } else {
         filteredTools = allTools.filter(tool => {
             const searchText = [
-                tool.name,
-                tool.description,
-                tool.category,
-                ...(tool.tags || [])
+                tool.name || '',
+                tool.description || '',
+                tool.category || '',
+                ...(Array.isArray(tool.tags) ? tool.tags : [])
             ].join(' ').toLowerCase();
             
             return searchText.includes(query);
@@ -400,14 +660,82 @@ function handleSearch(event) {
     renderTools();
 }
 
-// Function to filter tools by category
+// Enhanced category filtering
 function filterByCategory(category) {
-    if (category === 'all') {
+    if (!category || category === 'all') {
         filteredTools = [...allTools];
     } else {
-        filteredTools = allTools.filter(tool => tool.category === category);
+        filteredTools = allTools.filter(tool => 
+            tool.category === category
+        );
     }
     renderTools();
+}
+
+// Utility functions
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function handleLoadingError(error) {
+    console.error('Failed to load tools:', error);
+    const errorEl = document.getElementById('error');
+    if (errorEl) {
+        errorEl.style.display = 'block';
+        errorEl.innerHTML = `
+            <p>⚠️ Failed to load tools</p>
+            <p style="font-size: 0.9rem; color: var(--text-secondary);">
+                ${escapeHtml(error.message)}
+            </p>
+            <button onclick="refreshTools()" style="margin-top: 1rem;">
+                🔄 Try Again
+            </button>
+        `;
+    }
+}
+
+function handleVisibilityChange() {
+    if (!document.hidden && loadAttempted && allTools.length === 0) {
+        // Retry loading if page becomes visible and no tools were loaded
+        setTimeout(loadTools, 1000);
+    }
+}
+
+function handleGlobalError(event) {
+    console.error('Global error:', event.error);
+}
+
+function showGlobalError(message) {
+    const errorDiv = document.createElement('div');
+    errorDiv.style.cssText = `
+        position: fixed; top: 20px; right: 20px; z-index: 10000;
+        background: #f8d7da; color: #721c24; padding: 1rem;
+        border: 1px solid #f5c6cb; border-radius: 4px;
+        max-width: 300px; font-family: system-ui, sans-serif;
+    `;
+    errorDiv.textContent = message;
+    document.body.appendChild(errorDiv);
+    
+    setTimeout(() => {
+        if (errorDiv.parentNode) {
+            errorDiv.parentNode.removeChild(errorDiv);
+        }
+    }, 5000);
+}
+
+// Public API functions
+function refreshTools() {
+    loadAttempted = false;
+    allTools = [];
+    filteredTools = [];
+    loadTools();
 }
 
 // Export functions for global access
@@ -416,3 +744,4 @@ window.showAbout = showAbout;
 window.scrollToTools = scrollToTools;
 window.openTool = openTool;
 window.filterByCategory = filterByCategory;
+window.refreshTools = refreshTools;
