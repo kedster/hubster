@@ -110,7 +110,7 @@ function renderTools() {
     });
 }
 
-// Tool opening
+// Tool opening - Fixed for CSS loading
 function openTool(tool) {
     const toolView = document.getElementById('tool-view');
     const toolTitle = document.getElementById('tool-title');
@@ -123,9 +123,43 @@ function openTool(tool) {
     toolTitle.textContent = tool.name;
     
     const iframe = document.createElement('iframe');
-    iframe.src = `${tool.path || `tools/${tool.id}`}/index.html`;
-    iframe.style.cssText = 'width: 100%; height: 600px; border: none; border-radius: 8px;';
-    iframe.sandbox = 'allow-scripts allow-same-origin allow-forms';
+    
+    // Construct the correct path
+    const toolPath = tool.path ? tool.path.replace(/^\//, '') : `tools/${tool.id}`;
+    iframe.src = `${toolPath}/index.html`;
+    
+    // Enhanced iframe styling and sandbox permissions
+    iframe.style.cssText = 'width: 100%; height: 600px; border: none; border-radius: 8px; background: #fff;';
+    
+    // Allow more permissions for proper CSS/JS loading
+    iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups';
+    
+    // Add loading event handlers
+    iframe.onload = function() {
+        // Ensure iframe content is properly styled
+        try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            if (iframeDoc) {
+                // Force a repaint to ensure CSS is applied
+                iframe.style.opacity = '0.99';
+                setTimeout(() => {
+                    iframe.style.opacity = '1';
+                }, 10);
+            }
+        } catch (e) {
+            // Cross-origin restrictions - this is expected
+        }
+    };
+    
+    iframe.onerror = function() {
+        console.error(`Failed to load tool: ${tool.name}`);
+        toolContent.innerHTML = `
+            <div style="padding: 20px; text-align: center; color: #666;">
+                <p>Failed to load tool. Please check if the tool files exist.</p>
+                <p>Path: ${toolPath}/index.html</p>
+            </div>
+        `;
+    };
     
     toolContent.innerHTML = '';
     toolContent.appendChild(iframe);
