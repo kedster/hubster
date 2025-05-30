@@ -138,7 +138,7 @@ class ToolHubBuilder {
 // CLI
 if (require.main === module) {
     const builder = new ToolHubBuilder();
-    const command = process.argv[2] || 'help';
+    const command = process.argv[2] || 'build'; // Default to build
     
     switch (command) {
         case 'scan':
@@ -150,8 +150,14 @@ if (require.main === module) {
         case 'clean':
             builder.clean();
             break;
+        case 'help':
+            console.log('Usage: node build.js [scan|build|clean]');
+            console.log('  scan  - Scan for tools');
+            console.log('  build - Build tool hub (default)');
+            console.log('  clean - Clean output directory');
+            break;
         default:
-            console.log('Commands: scan, build, clean');
+            console.log('Unknown command. Use: node build.js help');
     }
 }
 
