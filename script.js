@@ -124,30 +124,51 @@ function openTool(tool) {
     
     const iframe = document.createElement('iframe');
     
-    // Construct the correct path
-    const toolPath = tool.path ? tool.path.replace(/^\//, '') : `tools/${tool.id}`;
+    // Ensure proper path construction - use dist path if available
+    let toolPath;
+    if (tool.path) {
+        toolPath = tool.path.startsWith('/') ? tool.path.substring(1) : tool.path;
+    } else {
+        toolPath = `tools/${tool.id}`;
+    }
+    
+    // Check if we should use the dist version
+    const useDistPath = window.location.pathname.includes('dist/') || 
+                       document.querySelector('script[src*="dist/"]') ||
+                       allTools.some(t => t.path && t.path.includes('dist/'));
+    
+    if (useDistPath && !toolPath.startsWith('dist/')) {
+        toolPath = `dist/${toolPath}`;
+    }
+    
     iframe.src = `${toolPath}/index.html`;
     
-    // Enhanced iframe styling and sandbox permissions
+    // Remove sandbox entirely to allow full CSS/JS loading
     iframe.style.cssText = 'width: 100%; height: 600px; border: none; border-radius: 8px; background: #fff;';
     
-    // Allow more permissions for proper CSS/JS loading
-    iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups';
-    
-    // Add loading event handlers
+    // Add base tag injection to fix relative paths
     iframe.onload = function() {
-        // Ensure iframe content is properly styled
         try {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-            if (iframeDoc) {
-                // Force a repaint to ensure CSS is applied
-                iframe.style.opacity = '0.99';
-                setTimeout(() => {
-                    iframe.style.opacity = '1';
-                }, 10);
+            if (iframeDoc && iframeDoc.head) {
+                // Check if base tag already exists
+                if (!iframeDoc.querySelector('base')) {
+                    const base = iframeDoc.createElement('base');
+                    const currentUrl = new URL(iframe.src, window.location.href);
+                    base.href = currentUrl.href.substring(0, currentUrl.href.lastIndexOf('/') + 1);
+                    iframeDoc.head.insertBefore(base, iframeDoc.head.firstChild);
+                }
+                
+                // Force style recalculation
+                const links = iframeDoc.querySelectorAll('link[rel="stylesheet"]');
+                links.forEach(link => {
+                    const href = link.href;
+                    link.href = '';
+                    setTimeout(() => link.href = href, 1);
+                });
             }
         } catch (e) {
-            // Cross-origin restrictions - this is expected
+            console.warn('Could not inject base tag (cross-origin):', e.message);
         }
     };
     
@@ -156,7 +177,8 @@ function openTool(tool) {
         toolContent.innerHTML = `
             <div style="padding: 20px; text-align: center; color: #666;">
                 <p>Failed to load tool. Please check if the tool files exist.</p>
-                <p>Path: ${toolPath}/index.html</p>
+                <p>Expected path: ${toolPath}/index.html</p>
+                <button onclick="window.location.reload()" style="margin-top: 10px; padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Reload Page</button>
             </div>
         `;
     };
