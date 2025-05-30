@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Tool Hub - A collection of web tools and utilities">
+    <meta name="keywords" content="web tools, utilities, developer tools">
+    <title>Tool Hub - Web Tools & Utilities</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <a href="#" class="logo" onclick="showHome()">Tool Hub</a>
+                <nav>
+                    <ul class="nav-links">
+                        <li><a href="#" onclick="showHome()">Home</a></li>
+                        <li><a href="#tools" onclick="scrollToTools()">Tools</a></li>
+                        <li><a href="#about" onclick="showAbout()">About</a></li>
+                        <li><a href="https://github.com/yourusername/tool-hub" target="_blank">GitHub</a></li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </header>
+    <main>
+        <div class="container">
+            <!-- Home View -->
+            <div id="home-view">
+                <section class="hero">
+                    <h1>Tool Hub</h1>
+                    <p>A curated collection of web tools and utilities designed to make your work easier and more efficient.</p>
+                    
+                    <div class="search-container">
+                        <div class="search-icon">🔍</div>
+                        <input type="text" class="search-input" placeholder="Search tools..." id="searchInput">
+                    </div>
+                </section>
+
+                <section id="tools" class="tools-section">
+                    <div id="loading" class="loading">
+                        Loading tools... ⏳
+                    </div>
+                    <div id="error" class="error" style="display: none;">
+                        Error loading tools. Using fallback data.
+                    </div>
+                    <div class="tools-grid" id="toolsGrid">
+                        <!-- Tools will be loaded dynamically -->
+                    </div>
+                    <div id="no-tools" class="no-tools" style="display: none;">
+                        No tools found matching your search.
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tool View -->
+            <div id="tool-view" class="tool-view">
+                <div class="tool-header">
+                    <h2 id="tool-title">Tool Name</h2>
+                    <button class="back-button" onclick="showHome()">← Back to Tools</button>
+                </div>
+                <div class="tool-content" id="tool-content">
+                    <!-- Tool content will be loaded here -->
+                </div>
+            </div>
+
+            <!-- About View -->
+            <div id="about-view" style="display: none;">
+                <section class="hero">
+                    <h1>About Tool Hub</h1>
+                    <p>Tool Hub is an open-source collection of web-based utilities designed to streamline your workflow and boost productivity.</p>
+                </section>
+                <div style="background: white; border-radius: 12px; padding: 2rem; box-shadow: var(--shadow-large); margin: 2rem 0;">
+                    <h3>Features</h3>
+                    <ul style="margin: 1rem 0; padding-left: 2rem;">
+                        <li>Dynamic tool discovery and loading</li>
+                        <li>Responsive design that works on all devices</li>
+                        <li>Fast, client-side tool execution</li>
+                        <li>Easy to extend with new tools</li>
+                        <li>Modern, intuitive interface</li>
+                    </ul>
+                    
+                    <h3>Adding New Tools</h3>
+                    <p>To add a new tool to the hub:</p>
+                    <ol style="margin: 1rem 0; padding-left: 2rem;">
+                        <li>Create a new folder in the <code>/tools</code> directory</li>
+                        <li>Add an <code>index.html</code> file with your tool</li>
+                        <li>Create a <code>config.json</code> file with tool metadata</li>
+                        <li>The tool will be automatically discovered and added to the hub</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Tool Hub. Built with ❤️ and deployed with Cloudflare Pages.</p>
+        </div>
+    </footer>
+    <script src="script.js"></script>
+    <script>
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', () => {
+            showHome();
+            loadTools();
+        });
+
+        // Function to show the home view
+        function showHome() {
+            document.getElementById('home-view').style.display = 'block';
+            document.getElementById('tool-view').style.display = 'none';
+            document.getElementById('about-view').style.display = 'none';
+        }
+
+        // Function to show the about view
+        function showAbout() {
+            document.getElementById('home-view').style.display = 'none';
+            document.getElementById('tool-view').style.display = 'none';
+            document.getElementById('about-view').style.display = 'block';
+        }
+
+        // Function to scroll to tools section
+        function scrollToTools() {
+            document.getElementById('tools').scrollIntoView({ behavior: 'smooth' });
+        }
+        // Function to load tools dynamically
+        function loadTools() {
+            // Simulate an API call to fetch tools
+            setTimeout(() => {
+                // For demo purposes, we'll use the fallback tools
+                allTools = fallbackTools;
+                renderTools();
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
